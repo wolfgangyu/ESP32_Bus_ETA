@@ -77,6 +77,8 @@
 #define USE_NTP              true   // 使用 NTP 校時
 
 // LED PWM channel 分配 (供 LEDManager、LightSensor 共用)
+// RGB LED 為共陽極 (Active Low)：GPIO4=紅, GPIO16=綠, GPIO17=藍
+// 背光 GPIO27 為共陰極 (正向)
 #define LED_CH_RED   0
 #define LED_CH_GREEN 1
 #define LED_CH_BLUE  2

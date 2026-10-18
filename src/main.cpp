@@ -228,6 +228,17 @@ void setup() {
     // 初始化 LED
     led.begin();
 
+    // 開機 LED 自檢：紅→綠→藍各亮 500ms
+    ledcWrite(0, 0);   // 紅亮
+    ledcWrite(1, 255); ledcWrite(2, 255);
+    delay(500);
+    ledcWrite(0, 255); ledcWrite(1, 0); ledcWrite(2, 255);  // 綠亮
+    delay(500);
+    ledcWrite(0, 255); ledcWrite(1, 255); ledcWrite(2, 0);  // 藍亮
+    delay(500);
+    ledcWrite(0, 255); ledcWrite(1, 255); ledcWrite(2, 255); // 全滅
+    delay(200);
+
 #ifdef FW_VERSION
     tft.setTextColor(C_WX_DIM, TFT_BLACK);
     tft.setTextSize(1);
@@ -283,11 +294,17 @@ void setup() {
         lastWxMs = millis();
 
         // 初始化 SD 卡
-        if (sd.begin()) {
+        bool sdOk = sd.begin();
+        if (sdOk) {
             Serial.println("[SD] Ready");
+            tft.setTextColor(TFT_GREEN, TFT_BLACK);
         } else {
             Serial.println("[SD] Not available (continue without SD)");
+            tft.setTextColor(TFT_RED, TFT_BLACK);
         }
+        tft.setTextSize(1);
+        tft.setCursor(5, 40);
+        tft.printf("SD: %s", sdOk ? "OK" : "NO CARD");
 
         // 初始化光感電阻自動背光
         ldr.begin();

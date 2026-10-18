@@ -12,25 +12,27 @@ enum LedState {
 
 class LEDManager {
 private:
+    // 共陽極 RGB LED：LOW=亮，HIGH=滅
+    static const uint8_t PIN_RED   = 4;   // 紅
+    static const uint8_t PIN_GREEN = 16;  // 綠
+    static const uint8_t PIN_BLUE  = 17;  // 藍
+    static const uint8_t PIN_BL    = 27;  // 背光（共陰極，正向）
+
     static const uint8_t CH_RED   = 0;
     static const uint8_t CH_GREEN = 1;
     static const uint8_t CH_BLUE  = 2;
-    static const uint8_t CH_BL    = 3;   // 背光專用
-
-    static const uint8_t PIN_RED   = 4;
-    static const uint8_t PIN_GREEN = 17;
-    static const uint8_t PIN_BLUE  = 16;
-    static const uint8_t PIN_BL    = 27;
+    static const uint8_t CH_BL    = 3;
 
     static const uint32_t PWM_FREQ = 5000;
     static const uint8_t PWM_RES   = 8;
 
+    // 共陽極：duty=0 最亮，duty=255 最暗
+    static const uint8_t DUTY_ON  = 0;
+    static const uint8_t DUTY_OFF = 255;
+
     LedState currentState = LED_OFF;
     unsigned long lastTick = 0;
     unsigned int phase = 0;
-
-    // 方波/呼吸波查表 (沿用 main.cpp 既有 cosTab)
-    static const unsigned char cosTab[128];
 
 public:
     LEDManager();
