@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <TFT_eSPI.h>
+#include "config.h"
 #include "config_local.h"
 #include "WiFiManager.h"
 #include "TDXClient.h"
@@ -229,6 +230,9 @@ void setup() {
     Serial.begin(115200);
     delay(300);
     Serial.println("\n=== HW-950 Bus ETA ===");
+#ifdef FW_VERSION
+    Serial.printf("[info] fw=%s build=%s\n", FW_VERSION, __DATE__);
+#endif
 
     // strapping
     pinMode(12, OUTPUT); digitalWrite(12, LOW);
@@ -245,6 +249,13 @@ void setup() {
     tft.init();
     tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
+
+#ifdef FW_VERSION
+    tft.setTextColor(C_WX_DIM, TFT_BLACK);
+    tft.setTextSize(1);
+    tft.setCursor(0, tft.height() - 8);
+    tft.printf("%s %s", FW_VERSION, __DATE__);
+#endif
 
     // 連線中：快呼吸
     ledState = LED_FAST;

@@ -69,6 +69,7 @@ main.cpp
 ## 關鍵規則
 
 - TDX API Key、Wi-Fi 密碼**只能**放在 `include/config_local.h` (gitignored)；金鑰來源備份檔 `/.env` 也已 gitignore，**兩處都**勿上傳
+- `FW_VERSION`（`include/config.h`）預設 `"dev"`；出 release 前手動改成 `v0.x.y` 再建置，開機 serial 會印 `[info] fw=... build=...`。出 release 流程見 `DEVELOPMENT.md` 的 Release 流程章節
 - 中文回覆、繁體、半形空格分隔英數
 - 先用現成庫，再造輪子；Bug 從第一性原理分析
 

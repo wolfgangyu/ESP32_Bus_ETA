@@ -63,3 +63,55 @@ pio run -e esp32dev -t clean
 - 確認 TDX Client ID / Secret 有效
 - 站牌用 `TARGET_STOP_WEST/EAST` 的 stopID（config_local.h）
 - serial 印 `[TDX] fetched, total=N`，N=0 時查金鑰或站牌 ID
+
+---
+
+## Release 流程
+
+### 版本號規則（SemVer）
+
+- `v0.x.y`：未正式 1.0，自由迭代
+  - `y`（patch）：修 bug、顯示微調
+  - `x`（minor）：新功能（觸控整合、新增資料源、新頁面）
+
+### 出 release 步驟
+
+```bash
+# 1. 改 config.h 的版本字串
+#    include/config.h: #define FW_VERSION "v0.1.0"
+
+# 2. 建置確認
+pio run -e esp32dev
+
+# 3. 上機驗證（serial 應印 [info] fw=v0.1.0 build=...）
+
+# 4. 提交並 tag
+git commit -am "release: v0.1.0"
+git tag v0.1.0
+
+# 5. 推 tag + release（附 firmware.bin）
+gh release create v0.1.0 \
+  .pio/build/esp32dev/firmware.bin \
+  --title "v0.1.0" \
+  --generate-notes
+```
+
+### `FW_VERSION` 行為
+
+- `config.h` 預設 `"dev"`；出 release 前手動改成目標版本號
+- 開機 serial 印 `[info] fw=<FW_VERSION> build=<__DATE__>`
+- 螢幕左下小灰字印 `<FW_VERSION> <build date>`（短暫可見，之後被 Wi-Fi 連線畫面覆蓋）
+
+### Release notes 格式
+
+```
+## What's new
+- 觸控整合（XPT2046）
+- 新增 AQI 顯示
+
+## Known issues
+- （如有）
+
+## 燒錄方法
+pio run -e esp32dev -t upload
+```
