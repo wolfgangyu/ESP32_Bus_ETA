@@ -4,9 +4,11 @@
  * 使用 TFT_eSPI 內建觸控 API:
  *   uint8_t getTouch(uint16_t *x, uint16_t *y, uint16_t threshold = 600)
  *   回傳 1 代表有觸控，x/y 透過指標回傳
+ *   void setTouch(uint16_t *data) - 設定校準資料 [x0, y0, x1, y1, rotation]
  */
 
 #include "TouchManager.h"
+#include "config.h"
 
 TouchManager::TouchManager() {}
 
@@ -16,7 +18,23 @@ void TouchManager::begin(TFT_eSPI* tftPtr) {
     if (tftPtr) {
         tft = tftPtr;
     }
-    initialized = true;
+    // TFT_eSPI 觸控初始化：設定校準值即可啟用
+    // setTouch 接受 uint16_t data[5] = {x0, y0, x1, y1, rotation}
+    if (tft) {
+        uint16_t calData[5] = {
+            (uint16_t)TOUCH_CAL_X0,
+            (uint16_t)TOUCH_CAL_Y0,
+            (uint16_t)TOUCH_CAL_X1,
+            (uint16_t)TOUCH_CAL_Y1,
+            1  // rotation = 1 (與 tft.setRotation(1) 一致)
+        };
+        tft->setTouch(calData);
+        initialized = true;
+        #ifdef DEBUG_SERIAL
+        Serial.printf("[Touch] setTouch() OK: x0=%d y0=%d x1=%d y1=%d rot=%d\n",
+                      calData[0], calData[1], calData[2], calData[3], calData[4]);
+        #endif
+    }
     wasPressed = false;
 }
 

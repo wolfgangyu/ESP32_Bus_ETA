@@ -1,7 +1,7 @@
 ﻿# HW-950 ESP32 開發板 — 確認硬體規格
 
 > 專案：ESP32 公車到站提示系統
-> 最後確認：2026-10-17（螢幕正式跑通）
+> 最後確認：2026-10-18（觸控、LED 三態、SD 卡、光感自動背光 全部跑通）
 > 來源：官方 spec PDF（bitbyg.dk ESP32-2432S024）＋實測驗證
 
 ---
@@ -74,6 +74,10 @@
 - **腳位注入**：`USER_SETUP_LOADED=1` + build_flags 定义，不改庫檔案
 - **SPI 頻率**：20 MHz（先穩定，可上調 55 MHz）
 - **init 前置**：觸控 CS=33、SD CS=5 拉高隔離，背光 27 HIGH
+- **觸控**：XPT2046 (CS=33, CLK=25, MOSI=32, MISO=39, IRQ=36)，TFT_eSPI initTouch()
+- **SD 卡**：VSPI (CS=5, MOSI=23, CLK=18, MISO=19)，SdFat/Arduino SD
+- **LED**：GPIO17/4/16 PWM 四態 (紅常亮/綠快閃/綠心跳/全滅)，GPIO27 背光 PWM
+- **光感**：GPIO34 ADC1_CH6，滑動平均+死區映射背光
 - 正式入口：`src/main.cpp`
 
 ---
@@ -84,3 +88,4 @@
 | --- | --- |
 | 2026-10-10 | 初版，驅動 IC 推測為 ST7789，白屏未解 |
 | 2026-10-17 | 依官方 spec PDF 確認驅動為 **ILI9341**、背光 27、init 需隔離觸控/SD CS；TFT_eSPI 跑通 |
+| 2026-10-18 | v0.2.0：啟用觸控、LED 三態、SD 卡、光感自動背光 |

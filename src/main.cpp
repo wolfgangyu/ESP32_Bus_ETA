@@ -17,6 +17,10 @@
 #include "TDXClient.h"
 #include "BusData.h"
 #include "WxManager.h"
+#include "TouchManager.h"
+#include "LEDManager.h"
+#include "SDManager.h"
+#include "LightSensor.h"
 #include <time.h>
 
 // 觸控 & SD 片選，init 前強制關閉隔離（防 MISO 匯流排被扯低）
@@ -42,6 +46,10 @@ WiFiManager wifi;
 TDXClient   tdx;
 BusData     busData;
 WxManager   wx;
+TouchManager touch;
+LEDManager  led;
+SDManager   sd;
+LightSensor ldr;
 
 static const int REFRESH_INTERVAL_S = 60;
 static const unsigned long WX_REFRESH_MS = 10 * 60 * 1000;  // 氣象/AQI 10 min
@@ -50,39 +58,6 @@ static unsigned long lastWxMs    = 0;
 static unsigned long lastNtpMs = 0;
 static char lastClockStr[12] = "";      // 上次畫上的時鐘字串（"MM/DD HH:MM"=11字+null）
 static unsigned long lastClockCheckMs = 0;
-
-// ── 呼吸燈 ──
-enum LedState { LED_OFF, LED_FAST, LED_SLOW };
-static LedState ledState = LED_OFF;
-static unsigned long lastLedTick = 0;
-static unsigned int ledPhase = 0;
-
-void ledBegin() {
-    ledcSetup(0, 5000, 8);
-    ledcAttachPin(LED_GREEN, 0);
-    pinMode(4,  OUTPUT); digitalWrite(4,  LOW);
-    pinMode(16, OUTPUT); digitalWrite(16, LOW);
-    // 共陰極：LOW=滅，HIGH=亮；PWM duty 越高越亮
-}
-
-void ledTick(unsigned long now) {
-    static const unsigned long PERIOD_FAST = 500;   // 連線中：0.5s 快閃
-    static const unsigned long PERIOD_SLOW = 1000;  // 已連線：1s 慢閃
-    if (ledState == LED_OFF) { ledcWrite(0, 0); return; }
-    if (now - lastLedTick < 20) return;
-    lastLedTick = now;
-    unsigned long period = (ledState == LED_FAST) ? PERIOD_FAST : PERIOD_SLOW;
-    ledPhase = (ledPhase + (unsigned int)(period / 256)) & 0xFF;
-    static const unsigned char cosTab[128] = {
-        0,7,14,22,29,36,44,51,59,66,73,80,88,95,102,109,115,122,129,135,142,148,154,160,166,172,177,182,187,192,196,201,
-        205,208,212,215,218,221,224,226,228,231,233,234,236,237,238,239,240,241,241,242,242,243,243,243,243,243,243,243,
-        242,242,241,241,240,239,238,237,236,234,233,231,228,226,224,221,218,215,212,208,205,201,196,192,187,182,177,172,
-        166,160,154,148,142,135,129,122,115,109,102,95,88,80,73,66,59,51,44,36,29,22,14,7,0
-    };
-    // 方波閃爍：上半週亮、下半週滅；亮度壓到 40/255，不刺眼
-    unsigned int v = (ledPhase < 128) ? 40 : 0;
-    ledcWrite(0, v);
-}
 
 // NTP：設定時鐘並同步
 void syncTime() {
@@ -237,9 +212,6 @@ void setup() {
     // strapping
     pinMode(12, OUTPUT); digitalWrite(12, LOW);
 
-    // 呼吸燈（綠燈 17 PWM）
-    ledBegin();
-
     // 【關鍵】隔離觸控 & SD CS，釋放 MISO
     pinMode(TOUCH_CS, OUTPUT); digitalWrite(TOUCH_CS, HIGH);
     pinMode(SD_CS,    OUTPUT); digitalWrite(SD_CS,    HIGH);
@@ -250,6 +222,12 @@ void setup() {
     tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
 
+    // 初始化觸控 (需在 tft.init() 之後)
+    touch.begin(&tft);
+
+    // 初始化 LED
+    led.begin();
+
 #ifdef FW_VERSION
     tft.setTextColor(C_WX_DIM, TFT_BLACK);
     tft.setTextSize(1);
@@ -257,8 +235,8 @@ void setup() {
     tft.printf("%s %s", FW_VERSION, __DATE__);
 #endif
 
-    // 連線中：快呼吸
-    ledState = LED_FAST;
+    // 連線中：快閃
+    led.setState(LED_FAST);
     tft.setTextColor(C_UPD, TFT_BLACK);
     tft.setTextSize(1);
     tft.setCursor(5, 5);
@@ -271,7 +249,7 @@ void setup() {
         wifi.loop();
         tries++;
         delay(2000);
-        ledTick(millis());
+        led.tick(millis());
         if (tries % 5 == 0) {
             tft.fillRect(5, 20, tft.width() - 10, 16, TFT_BLACK);
             tft.setCursor(5, 20);
@@ -304,31 +282,42 @@ void setup() {
         }
         lastWxMs = millis();
 
+        // 初始化 SD 卡
+        if (sd.begin()) {
+            Serial.println("[SD] Ready");
+        } else {
+            Serial.println("[SD] Not available (continue without SD)");
+        }
+
+        // 初始化光感電阻自動背光
+        ldr.begin();
+
         // 上電先抓一次公車
         doFetchAndShow();
         lastFetchMs = millis();
-        ledState = LED_SLOW;
+        led.setState(LED_HEARTBEAT);
     } else {
         tft.fillRect(5, 20, tft.width() - 10, 16, TFT_BLACK);
         tft.setTextColor(TFT_RED, TFT_BLACK);
         tft.setCursor(5, 20);
         tft.println(F("WiFi failed"));
         Serial.println("[FATAL] Wi-Fi 連線失敗");
-        ledState = LED_OFF;
+        led.setState(LED_RED_ON);
         return;
     }
 }
 
 void loop() {
     wifi.loop();
-    ledTick(millis());
+    led.tick(millis());
+    ldr.tick(millis());
     clockTick(millis());
 
-    // 斷線：燈熄
-    if (!wifi.isConnected() && ledState != LED_OFF) {
-        ledState = LED_FAST;
-    } else if (wifi.isConnected()) {
-        ledState = LED_SLOW;
+    // 斷線：紅燈常亮
+    if (!wifi.isConnected()) {
+        led.setState(LED_RED_ON);
+    } else {
+        led.setState(LED_HEARTBEAT);
     }
 
     // 定期 NTP 重對時
