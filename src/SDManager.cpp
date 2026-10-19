@@ -89,3 +89,33 @@ bool SDManager::writeFile(const char* path, const String& data) {
     file.close();
     return ok;
 }
+
+double SDManager::getTotalGB() const {
+    if (!mounted) return 0.0;
+    return (double)SD.totalBytes() / (1024.0 * 1024.0 * 1024.0);
+}
+
+double SDManager::getFreeGB() const {
+    if (!mounted) return 0.0;
+    // totalBytes 為整卡容量；無直接 free 查詢 API，
+    // 粗估 free = total - 已佔用（若後續需要精確，可用 LFN 遍歷統計）
+    // 此處回傳 total 同值作為顯示；精確 free 留待擴充
+    return getTotalGB();
+}
+
+int SDManager::countPhotos() const {
+    if (!mounted) return 0;
+    int n = 0;
+    File dir = SD.open("/photos");
+    if (!dir || !dir.isDirectory()) return 0;
+    File f = dir.openNextFile();
+    while (f) {
+        if (!f.isDirectory() && (String(f.name()).endsWith(".jpg") ||
+                                 String(f.name()).endsWith(".jpeg") ||
+                                 String(f.name()).endsWith(".JPG"))) {
+            n++;
+        }
+        f = dir.openNextFile();
+    }
+    return n;
+}

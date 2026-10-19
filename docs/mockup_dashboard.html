@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bus ETA — 320×240 橫置 mockup v6</title>
+<style>
+:root {
+  --bg: #020617;
+  --card: #0E1223;
+  --wx: #0A1A2E;
+  --fg: #F8FAFC;
+  --dim: #94A3B8;
+  --west: #22C55E;
+  --east: #EF4444;
+  --warn: #F59E0B;
+  --border: #334155;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#1a1a1a; color:var(--fg);
+  font-family:-apple-system,system-ui,"PingFang TC","Noto Sans TC",sans-serif;
+  display:flex; flex-direction:column; align-items:center;
+  padding:24px; gap:18px; min-height:100vh;
+}
+h1 { font-size:15px; color:var(--dim); font-weight:600; max-width:640px; text-align:center; line-height:1.5; }
+.panel { display:flex; flex-direction:column; align-items:center; gap:10px; }
+.title { font-size:12px; color:var(--dim); letter-spacing:.5px; text-align:center; }
+
+.screen {
+  width:320px; height:240px; background:var(--bg);
+  border:1px solid #444; position:relative; overflow:hidden;
+  /* 螢幕上的文字一律用 monospace 模擬 ASCII 等寬 */
+}
+.screen .asc { font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.grid {
+  position:absolute; inset:0; pointer-events:none;
+  background-image:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px);
+  background-size:40px 40px;
+}
+.note { font-size:11px; color:#888; max-width:440px; line-height:1.6; text-align:left; }
+.note b { color:#bbb; }
+
+/* ===== 天氣條 40px ===== */
+.wxbar {
+  position:absolute; left:0; right:0; top:0; height:40px;
+  background:var(--wx); border-bottom:1px solid #24405f;
+  display:flex; align-items:center; padding:0 8px; gap:8px;
+}
+.wx-icon { width:22px; height:22px; flex:none; }
+.wx-t { font-size:18px; font-weight:600; line-height:1; }
+.wx-txt { font-size:10px; color:var(--dim); line-height:1.3; }
+.wx-right { margin-left:auto; text-align:right; display:flex; align-items:center; gap:8px; }
+.wx-right .clk { font-size:14px; font-weight:600; font-variant-numeric:tabular-nums; }
+.wx-right .dt { font-size:10px; color:var(--dim); }
+/* (i) 按鈕：日期的右側 */
+.wx-right .info {
+  width:20px; height:20px; border-radius:50%;
+  border:1.5px solid var(--dim); color:var(--fg);
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; font-style:italic; cursor:pointer;
+  background:transparent;
+}
+
+/* ===== 公車滿幅（ETA 縮小 + 自動捲動）===== */
+.bus {
+  position:absolute; left:0; right:0; top:40px; bottom:0;
+  display:flex; overflow:hidden;
+}
+.col { flex:1; padding:8px 10px 4px; display:flex; flex-direction:column; position:relative; }
+.col + .col { border-left:1px solid var(--border); }
+.dir { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; flex:none; }
+.dir .lbl { font-size:14px; font-weight:700; letter-spacing:1px; }
+.dir .cnt { font-size:10px; font-weight:500; color:var(--dim); }
+.rollwin { flex:1; overflow:hidden; position:relative; }
+.rolllist { display:flex; flex-direction:column; animation:roll 12s infinite ease-in-out; }
+.item { height:44px; display:flex; align-items:center; gap:8px; flex:none; }
+.item + .item { border-top:1px solid #1a2236; }
+.item .rt { font-size:14px; font-weight:700; min-width:46px; font-variant-numeric:tabular-nums; }
+.item .eta { font-size:34px; font-weight:300; flex:1; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-1px; }
+.item .eta.soon { color:var(--warn); }
+.item .eta .u { font-size:11px; font-weight:500; color:var(--dim); letter-spacing:0; }
+.item .arr { font-size:9px; color:var(--dim); }
+@keyframes roll {
+  0%,15% { transform:translateY(0); }
+  50%,65% { transform:translateY(-44px); }
+  100% { transform:translateY(0); }
+}
+
+/* ===== 系統資訊頁 ===== */
+.syspage {
+  position:absolute; left:0; right:0; top:0; bottom:0;
+  background:var(--bg); padding:10px 14px;
+  display:flex; flex-direction:column;
+}
+.syspage h2 { font-size:14px; font-weight:700; color:var(--fg); margin-bottom:8px; display:flex; align-items:center; letter-spacing:1px; flex:none; }
+.syspage h2 .close { margin-left:auto; width:20px; height:20px; border-radius:50%; border:1.5px solid var(--dim); display:flex; align-items:center; justify-content:center; font-size:13px; cursor:pointer; color:var(--fg); background:transparent; }
+.syslist { flex:1; overflow-y:auto; }
+.sysrow { display:flex; justify-content:space-between; align-items:center; font-size:12px; padding:4px 0; border-bottom:1px solid #141d30; }
+.sysrow:last-child { border-bottom:none; }
+.sysrow .k { color:var(--dim); }
+.sysrow .v { color:var(--fg); font-weight:500; font-variant-numeric:tabular-nums; }
+.sysrow .v.ok { color:var(--west); }
+.sysrow .v.bad { color:var(--east); }
+.sysrow .v .dim { color:var(--dim); font-weight:400; }
+
+.tabs { display:flex; gap:8px; flex-wrap:wrap; }
+.tabs button { background:#2a2a2a; color:#ccc; border:1px solid #444; border-radius:6px; padding:6px 14px; font-size:12px; cursor:pointer; }
+.tabs button.on { background:#3a3a3a; color:#fff; border-color:#666; }
+.hidden { display:none !important; }
+
+/* ===== 天氣圖標樣張 ===== */
+.wxicons { display:flex; gap:14px; flex-wrap:wrap; justify-content:center; }
+.wxi { width:52px; display:flex; flex-direction:column; align-items:center; gap:4px; }
+.wxi svg { width:34px; height:34px; }
+.wxi span { font-size:10px; color:var(--dim); }
+</style>
+</head>
+<body>
+<h1>Bus ETA — v6：(i) 移到右上日期旁、版本收進系統頁、全螢幕 ASCII、Slideshow 相片放大 + 半透明跑馬燈、系統頁加 WiFi/BT MAC</h1>
+
+<div class="tabs">
+  <button class="on" onclick="show('main')">主畫面</button>
+  <button onclick="show('sys')">系統資訊</button>
+  <button onclick="show('slide')">Slideshow</button>
+  <button onclick="show('wx')">天氣圖標</button>
+</div>
+
+<!-- ===== 主畫面 ===== -->
+<div class="panel" id="panel-main">
+  <div class="title">(i) 在日期右側 · 版本收進系統頁 · ETA 34px · 全 ASCII</div>
+  <div class="screen asc">
+    <div class="wxbar">
+      <svg class="wx-icon" viewBox="0 0 24 24">
+        <circle fill="#F5C518" cx="8" cy="8" r="4"/>
+        <path fill="none" stroke="var(--fg)" stroke-width="1.8" d="M8 19 h9 a3.6 3.6 0 0 0 0-7 a5 5 0 0 0-8.7-1.8 a3.6 3.6 0 0 0 .7 8.8z"/>
+      </svg>
+      <span class="wx-t">17°</span>
+      <span class="wx-txt">CLOUDY<br>AQI 49 · RH 83%</span>
+      <div class="wx-right">
+        <div style="line-height:1.25">
+          <div class="clk">08:23</div>
+          <div class="dt">SAT 10/18</div>
+        </div>
+        <button class="info" title="系統資訊" onclick="show('sys')">i</button>
+      </div>
+    </div>
+
+    <div class="bus">
+      <div class="col">
+        <div class="dir"><span class="lbl" style="color:var(--west)">WEST</span><span class="cnt">5</span></div>
+        <div class="rollwin">
+          <div class="rolllist">
+            <div class="item"><span class="rt" style="color:var(--west)">262</span><span class="eta soon">3<span class="u">min</span></span><span class="arr">ARR</span></div>
+            <div class="item"><span class="rt" style="color:var(--west)">605</span><span class="eta">51<span class="u">min</span></span></div>
+            <div class="item"><span class="rt" style="color:var(--west)">306sh</span><span class="eta">55<span class="u">min</span></span></div>
+            <div class="item"><span class="rt" style="color:var(--west)">262</span><span class="eta">55<span class="u">min</span></span></div>
+            <div class="item"><span class="rt" style="color:var(--west)">617</span><span class="eta">62<span class="u">min</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="dir"><span class="lbl" style="color:var(--east)">EAST</span><span class="cnt">2</span></div>
+        <div class="rollwin">
+          <div class="rolllist" style="animation:none">
+            <div class="item"><span class="rt" style="color:var(--east)">270</span><span class="eta">8<span class="u">min</span></span></div>
+            <div class="item"><span class="rt" style="color:var(--east)">671</span><span class="eta">12<span class="u">min</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="grid"></div>
+
+    <div class="syspage hidden" id="sys">
+      <h2>SYSTEM <button class="close" onclick="show('main')">×</button></h2>
+      <div class="syslist">
+        <div class="sysrow"><span class="k">WiFi</span><span class="v ok">ON · 192.168.1.42</span></div>
+        <div class="sysrow"><span class="k">WiFi MAC</span><span class="v">04:B2:47:84:6B:A0</span></div>
+        <div class="sysrow"><span class="k">TDX Calls</span><span class="v">142 today</span></div>
+        <div class="sysrow"><span class="k">Data Used</span><span class="v">12.3 KB</span></div>
+        <div class="sysrow"><span class="k">SD Card</span><span class="v ok">OK · 7.4 GB free</span></div>
+        <div class="sysrow"><span class="k">Photos</span><span class="v">23 / 50</span></div>
+        <div class="sysrow"><span class="k">Backlight</span><span class="v">AUTO · 85%</span></div>
+        <div class="sysrow"><span class="k">Firmware</span><span class="v">v0.2.0 · 2026/10/18</span></div>
+        <div class="sysrow"><span class="k">TDX Stop</span><span class="v">Xinxin Park</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="note">
+    <b>(i) 移位</b>：右上「SAT 10/18」往左讓出 20px 放 (i) 圓形鈕；點 (i) 進系統頁，右上角 × 回主畫面（資訊可捲動，保留明確返回鈕）。<br>
+    <b>版本收進系統頁</b>：主畫面無 footer，公車 ETA 放大到 34px。<br>
+    <b>MAC</b>：只保留 WiFi MAC；BT 暫不啟用，等實際用到再說。<br>
+    <b>全 ASCII</b>：WEST/EAST/min/ARR；shuttle 顯示 306sh（見西向列）。
+  </div>
+</div>
+
+<!-- ===== 系統資訊（獨立 tab 預覽）===== -->
+<div class="panel hidden" id="panel-sys">
+  <div class="title">系統資訊頁（點 (i) 進入，再按 × 返回）</div>
+  <div class="screen asc">
+    <div class="syspage" style="position:relative">
+      <h2>SYSTEM <button class="close">×</button></h2>
+      <div class="syslist">
+        <div class="sysrow"><span class="k">WiFi</span><span class="v ok">ON · 192.168.1.42</span></div>
+        <div class="sysrow"><span class="k">WiFi MAC</span><span class="v">04:B2:47:84:6B:A0</span></div>
+        <div class="sysrow"><span class="k">TDX Calls</span><span class="v">142 today</span></div>
+        <div class="sysrow"><span class="k">Data Used</span><span class="v">12.3 KB</span></div>
+        <div class="sysrow"><span class="k">SD Card</span><span class="v ok">OK · 7.4 GB free</span></div>
+        <div class="sysrow"><span class="k">Photos</span><span class="v">23 / 50</span></div>
+        <div class="sysrow"><span class="k">Backlight</span><span class="v">AUTO · 85%</span></div>
+        <div class="sysrow"><span class="k">Firmware</span><span class="v">v0.2.0 · 2026/10/18</span></div>
+        <div class="sysrow"><span class="k">TDX Stop</span><span class="v">Xinxin Park</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slideshow 同風格 ===== -->
+<div class="panel hidden" id="panel-slide">
+  <div class="title">Slideshow：相片放大占滿、公車跑馬燈半透明疊照片下緣、無 footer、全 ASCII</div>
+  <div class="screen asc">
+    <div class="wxbar">
+      <svg class="wx-icon" viewBox="0 0 24 24">
+        <circle fill="#F5C518" cx="8" cy="8" r="4"/>
+        <path fill="none" stroke="var(--fg)" stroke-width="1.8" d="M8 19 h9 a3.6 3.6 0 0 0 0-7 a5 5 0 0 0-8.7-1.8 a3.6 3.6 0 0 0 .7 8.8z"/>
+      </svg>
+      <span class="wx-t">17°</span>
+      <span class="wx-txt">CLOUDY<br>AQI 49 · RH 83%</span>
+      <div class="wx-right">
+        <div style="line-height:1.25">
+          <div class="clk">08:23</div>
+          <div class="dt">SAT 10/18</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="position:absolute; left:0; right:0; top:40px; bottom:0; background:#1a2740; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+      <div style="width:320px; height:200px; background:linear-gradient(135deg,#2a4a6a,#3a6a4a,#4a3a5a); box-sizing:border-box; display:flex; align-items:flex-start; justify-content:flex-end; padding:8px;">
+        <span style="font-size:9px; color:rgba(255,255,255,.55);">photo_007 · 3:2 CROP</span>
+      </div>
+
+      <div style="position:absolute; left:0; right:0; bottom:0; height:34px; background:rgba(2,6,23,.55); overflow:hidden; white-space:nowrap; line-height:34px; font-size:12px; font-variant-numeric:tabular-nums;">
+        <span style="display:inline-block; padding-left:100%; animation:marquee 14s linear infinite;">
+          <span style="color:var(--west); font-weight:600;">W 262 3min · 605 51min · 306sh 55min</span>
+          &nbsp;&nbsp;
+          <span style="color:var(--east); font-weight:600;">E 270 8min · 671 12min</span>
+        </span>
+      </div>
+      <div style="position:absolute; bottom:40px; right:8px; font-size:9px; color:rgba(255,255,255,.7);">TAP = PAUSE</div>
+    </div>
+
+    <style>@keyframes marquee { 0%{transform:translateX(0)} 100%{transform:translateX(-100%)} }</style>
+    <div class="grid"></div>
+  </div>
+  <div class="note">
+    <b>相片放大</b>：全幅 200px，跑馬燈<b>半透明浮層疊照片下緣 34px</b>（無 blur，僅 55% 深色底，因為 ESP32 沒有 GPU）。<br>
+    <b>拿掉 footer</b>：版本與 (i) 都不在這頁（(i) 只在主畫面右上角）。<br>
+    全 ASCII：W/E、min、TAP = PAUSE。
+  </div>
+</div>
+
+<!-- ===== 天氣圖標樣張 ===== -->
+<div class="panel hidden" id="panel-wx">
+  <div class="title">天氣圖標 7 種 — 用 drawCircle + drawLine 現畫，無外部檔</div>
+  <div class="wxicons">
+    <div class="wxi"><svg viewBox="0 0 24 24"><circle fill="#F5C518" cx="12" cy="12" r="6"/><g stroke="#F5C518" stroke-width="1.6"><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></g></svg><span>SUN</span></div>
+    <div class="wxi"><svg viewBox="0 0 24 24"><circle fill="#F5C518" cx="8" cy="8" r="4"/><path fill="none" stroke="var(--fg)" stroke-width="1.8" d="M8 19 h9 a3.6 3.6 0 0 0 0-7 a5 5 0 0 0-8.7-1.8 a3.6 3.6 0 0 0 .7 8.8z"/></svg><span>CLOUD</span></div>
+    <div class="wxi"><svg viewBox="0 0 24 24"><path fill="none" stroke="var(--fg)" stroke-width="1.8" d="M6 18 h10 a4 4 0 0 0 0-8 a5.5 5.5 0 0 0-9.7-2 a4 4 0 0 0-.3 10z"/><path fill="none" stroke="#8aa4c0" stroke-width="1.6" d="M9 21 h3 M14 21 h3"/></svg><span>OVR</span></div>
+    <div class="wxi"><svg viewBox="0 0 24 24"><path fill="none" stroke="var(--fg)" stroke-width="1.8" d="M6 16 h10 a4 4 0 0 0 0-8 a5.5 5.5 0 0 0-9.7-2 a4 4 0 0 0-.3 10z"/><g stroke="#6ab0ff" stroke-width="1.6"><line x1="8" y1="19" x2="8" y2="21"/><line x1="12" y1="19" x2="12" y2="21"/><line x1="16" y1="19" x2="16" y2="21"/></g></svg><span>RAIN</span></div>
+    <div class="wxi"><svg viewBox="0 0 24 24"><path fill="none" stroke="#FFD84D" stroke-width="1.8" d="M13 3 L8 13 h4 L11 21 L18 10 h-4 L13 3z"/></svg><span>THST</span></div>
+    <div class="wxi"><svg viewBox="0 0 24 24"><g stroke="var(--dim)" stroke-width="1.6"><line x1="4" y1="10" x2="20" y2="10"/><line x1="4" y1="14" x2="18" y2="14"/><line x1="4" y1="18" x2="16" y2="18"/></g></svg><span>FOG</span></div>
+    <div class="wxi"><svg viewBox="0 0 24 24"><path fill="none" stroke="var(--fg)" stroke-width="1.8" d="M6 18 h10 a4 4 0 0 0 0-8 a5.5 5.5 0 0 0-9.7-2 a4 4 0 0 0-.3 10z"/></svg><span>SNOW</span></div>
+  </div>
+  <div class="note">
+    7 種對應 open-meteo WMO 碼：SUN(0/1)、CLOUD(2)、OVR(3)、RAIN(51-67)、THST(95-99)、FOG(45/48)、SNOW(71-77)。<br>
+    實際韌體用 <code>drawCircle</code>/<code>drawLine</code> 現畫，22×22px，不佔 flash、不吃 RAM；標籤全 ASCII。<br>
+    （SNOW 保留；台北冬季偶有，若覺得用不到可再砍。）
+  </div>
+</div>
+
+<!-- ===== 中文字說明（不進 mockup 屏，獨立區塊）===== -->
+<div class="panel" style="max-width:460px; width:100%">
+  <div class="title">為什麼螢幕上沒有中文字</div>
+  <div class="note" style="color:#999">
+    <b>不是不想畫，是這塊屏硬性畫不出來。</b><br>
+    · 可用寬度 320px，一個 32px 中文字（等寬）= 32px，一列最多放 <b>10 個</b>。<br>
+    · 想排 15-20 個中文字，字號得縮到 16px，出門喵一眼看不清。<br>
+    · 真要塞中文得用 TrueType 字體＋字表，Flash 至少要再加 300KB～數 MB；app 區才 ~1MB，一放就爆 82% 上限。<br>
+    所以全部改英文縮寫，英文字窄（7-14px），320px 一列輕鬆放 8-12 個。對照：西向→WEST、東向→EAST、即將到→ARR、分→min、濕→RH。
+  </div>
+</div>
+
+<script>
+function show(k){
+  const map = {main:'panel-main', sys:'panel-sys', slide:'panel-slide', wx:'panel-wx'};
+  for (const [key, id] of Object.entries(map)){
+    document.getElementById(id).classList.toggle('hidden', key!==k);
+  }
+  document.querySelectorAll('.tabs button').forEach((b,i)=>{
+    const names=['main','sys','slide','wx'];
+    b.classList.toggle('on', names[i]===k);
+  });
+  // (i) 進系統頁：把主畫面內的系統覆蓋層開起來，× 回主畫面
+  const sysOv = document.querySelector('#panel-main .syspage');
+  if (sysOv) sysOv.style.display = (k==='sys') ? 'flex' : '';
+}
+</script>
+</body>
+</html>

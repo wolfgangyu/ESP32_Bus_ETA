@@ -35,6 +35,25 @@ String WxManager::wxText() const {
     }
 }
 
+// ── WMO 天氣碼 → 圖標類型（7 種，全 ASCII 標籤）──
+int WxManager::wxIconType(int code) {
+    switch (code) {
+        case 0: case 1:  return ICON_SUN;     // 晴 / 多半晴
+        case 2:          return ICON_CLOUD;   // 多雲
+        case 3:          return ICON_OVR;     // 陰
+        case 45: case 48:return ICON_FOG;     // 霧
+        case 51: case 53: case 55:
+        case 56: case 57:
+        case 61: case 63: case 65:
+        case 66: case 67:
+        case 80: case 81: case 82: return ICON_RAIN;  // 雨 / 毛毛雨
+        case 95: case 96: case 99: return ICON_THST;   // 雷雨
+        case 71: case 73: case 75: case 77:
+        case 85: case 86:          return ICON_SNOW;    // 雪
+        default:         return ICON_NONE;
+    }
+}
+
 bool WxManager::fetchAll() {
     lastFetchMs = millis();
 

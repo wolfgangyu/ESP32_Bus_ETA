@@ -46,7 +46,14 @@ public:
     int  getWxLow()  const { return tempLow; }
     int  getAqi()    const { return aqi; }
     String getWxText() const { return wxText(); }
+    int  getWxCode() const { return wxCode; }
+    int  getWxIconType() const { return wxIconType(wxCode); }
     bool isValid()   const { return valid; }
+
+public:
+    // 天氣圖標類型（供 UIManager 現畫，7 種全 ASCII 標籤）
+    enum WxIcon { ICON_NONE=-1, ICON_SUN, ICON_CLOUD, ICON_OVR, ICON_RAIN, ICON_THST, ICON_FOG, ICON_SNOW };
+    static int wxIconType(int code);
 };
 
 #endif

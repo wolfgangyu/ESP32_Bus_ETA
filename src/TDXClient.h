@@ -30,6 +30,15 @@ public:
     String fetchBusETA(const String& stopName);
     String fetchBusETAByName(const String& stopNameZh);
     bool isTokenValid() const { return millis() < tokenExpiry; }
+
+    // 系統資訊用：今日呼叫次數 + 累計資料量（KB）
+    int  getCallCount() const { return callCount; }
+    float getDataUsedKB() const { return (float)dataBytes / 1024.0f; }
+    void resetCounters() { callCount = 0; dataBytes = 0; }
+
+private:
+    int  callCount = 0;     // 今日 TDX GET 次數（含 token）
+    size_t dataBytes = 0;   // 累計回應 byte（含 token）
 };
 
 #endif

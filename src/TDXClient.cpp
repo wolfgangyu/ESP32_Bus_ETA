@@ -50,9 +50,10 @@ String TDXClient::getAccessToken() {
 
     String postData = "grant_type=client_credentials";
     int httpCode = http.POST(postData);
-
+    callCount++;
     if (httpCode == 200) {
         String response = http.getString();
+        dataBytes += response.length();
         // ArduinoJson 6.x: 用 DynamicJsonDocument（容量依 response 長度）
         DynamicJsonDocument doc(response.length() + 256);
         DeserializationError error = deserializeJson(doc, response);
@@ -108,10 +109,12 @@ String TDXClient::fetchBusETA(const String& stopName) {
     http.addHeader("Accept", "application/json");
 
     int httpCode = http.GET();
+    callCount++;
 
     String response = "";
     if (httpCode == 200) {
         response = http.getString();
+        dataBytes += response.length();
         #ifdef DEBUG_SERIAL
         Serial.printf("API 回應長度: %d bytes\n", response.length());
         #endif
@@ -154,10 +157,12 @@ String TDXClient::fetchBusETAByName(const String& stopNameZh) {
     http.addHeader("Accept", "application/json");
 
     int httpCode = http.GET();
+    callCount++;
     String response = "";
 
     if (httpCode == 200) {
         response = http.getString();
+        dataBytes += response.length();
         #ifdef DEBUG_SERIAL
         Serial.printf("ETA 回應長度: %d bytes\n", response.length());
         #endif

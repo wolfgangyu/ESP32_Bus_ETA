@@ -1,12 +1,13 @@
 /*
- * main.cpp - HW-950 ESP32 公車到站提示（正式整合）
+ * main.cpp - HW-950 ESP32 公車到站提示（v2: 大字體、出門喵一眼）
  *
  * 螢幕：2.4" ILI9341，Bodmer/TFT_eSPI 驅動
  * 排線腳位：SCK=14 MOSI=13 MISO=12 CS=15 DC=2 BL=27（build_flags 注入）
  * 關鍵：init 前把觸控 CS=33、SD CS=5 拉高隔離，防 MISO 被扯低
  * NTP：time.stdtime.gov.tw（ROC 時區），開機 + 定時對時
-  * LED：綠燈 GPIO17（共陰極：LOW=滅、HIGH=亮）；PWM 方波閃爍，連線中快閃、已連線慢閃、離線熄
- * 字型：只用 TFT_eSPI 內建 ASCII（LOAD_FONT2），畫面全英文，避免中文字型缺失
+ * LED：綠燈 GPIO17（共陰極：LOW=滅、HIGH=亮）；PWM 方波閃爍，連線中快閃、已連線慢閃、離線熄
+ * 字型：只用 TFT_eSPI 內建 ASCII（LOAD_FONT2/4/6），畫面全英文，避免中文字型缺失
+ * UI：Page 0 Dashboard / Page 1 Slideshow，觸控左右滑動切換
  */
 #include <Arduino.h>
 #include <SPI.h>
@@ -21,6 +22,8 @@
 #include "LEDManager.h"
 #include "SDManager.h"
 #include "LightSensor.h"
+#include "UIManager.h"
+#include "Slideshow.h"
 #include <time.h>
 
 // 觸控 & SD 片選，init 前強制關閉隔離（防 MISO 匯流排被扯低）
@@ -34,13 +37,6 @@
 #define NTP_SERVER2  "time.stdtime.gov.tw"
 #define NTP_REFRESH_MS 3600000UL   // 每小時重對一次時
 
-// 時鐘獨立局部重繪（選 A：與 60s 车次 redraw 脫鉤）
-#define CLOCK_CHECK_MS   500UL     // 檢查週期
-#define CLOCK_X          140       // 表頭 x（W=240，"10/17 20:29" = 11 字元 = 66px，140+66=206 < 240）
-#define CLOCK_Y          3
-#define CLOCK_W          70        // 11 字元 × 6px + 邊距
-#define CLOCK_H          10
-
 TFT_eSPI    tft = TFT_eSPI();
 WiFiManager wifi;
 TDXClient   tdx;
@@ -50,14 +46,18 @@ TouchManager touch;
 LEDManager  led;
 SDManager   sd;
 LightSensor ldr;
+UIManager   ui;
+Slideshow   slideshow;
 
 static const int REFRESH_INTERVAL_S = 60;
 static const unsigned long WX_REFRESH_MS = 10 * 60 * 1000;  // 氣象/AQI 10 min
 static unsigned long lastFetchMs = 0;
 static unsigned long lastWxMs    = 0;
 static unsigned long lastNtpMs = 0;
-static char lastClockStr[12] = "";      // 上次畫上的時鐘字串（"MM/DD HH:MM"=11字+null）
-static unsigned long lastClockCheckMs = 0;
+
+Page currentPage = PAGE_DASHBOARD;
+bool pageSwitchPending = false;
+Page pendingPage = PAGE_DASHBOARD;
 
 // NTP：設定時鐘並同步
 void syncTime() {
@@ -72,139 +72,67 @@ void syncTime() {
         Serial.println("[NTP] sync failed (will retry)");
     }
 }
-// 顏色（全用 TFT_eSPI 標準色）
-static const uint16_t HDR_BG  = 0x2400;   // 深藍表頭
-static const uint16_t WX_BG   = 0x0A1A2E;  // 氣象條深藍底
-static const uint16_t C_TITLE = TFT_YELLOW;
-static const uint16_t C_UPD   = TFT_CYAN;
-static const uint16_t C_WEST  = TFT_GREEN;
-static const uint16_t C_EAST  = TFT_MAGENTA;
-static const uint16_t C_LIST  = TFT_WHITE;
-static const uint16_t C_WX    = TFT_WHITE;
-static const uint16_t C_WX_DIM= 0x5555;
 
-// 時鐘格式：MM/DD HH:MM（NTP 未同步時印 "NTP pending"）
-String clockStr() {
-    struct tm t;
-    if (!getLocalTime(&t, 2000)) return String("NTP pending");
-    char buf[12];
-    snprintf(buf, sizeof(buf), "%02d/%02d %02d:%02d",
-             t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min);
-    return String(buf);
-}
-
-// 局部重繪：drawScreen() 全清後必須重印，其餘只有字串變化才重畫
-static bool clockNeedsRedraw = true;   // 全清後第一次一定要畫
-void clockTick(unsigned long now) {
-    if (now - lastClockCheckMs < CLOCK_CHECK_MS) return;
-    lastClockCheckMs = now;
-    char newStr[16];
-    String s = clockStr();
-    s.toCharArray(newStr, sizeof(newStr));
-    if (strcmp(newStr, lastClockStr) == 0 && !clockNeedsRedraw) return;
-    clockNeedsRedraw = false;
-    strncpy(lastClockStr, newStr, sizeof(lastClockStr) - 1);
-    lastClockStr[sizeof(lastClockStr) - 1] = '\0';
-    tft.fillRect(CLOCK_X, CLOCK_Y - 1, CLOCK_W, CLOCK_H + 2, HDR_BG);
-    tft.setTextColor(TFT_WHITE, HDR_BG);
-    tft.setTextSize(1);
-    tft.setCursor(CLOCK_X, CLOCK_Y);
-    tft.print(lastClockStr);
-}
-
-
-void drawScreen() {
-    tft.fillScreen(TFT_BLACK);
-    int W = tft.width();
-
-    // ── 表頭 ──
-    tft.fillRect(0, 0, W, 26, HDR_BG);
-    tft.setTextSize(1);
-    tft.setTextColor(C_TITLE, HDR_BG);
-    tft.setCursor(4, 3);
-    tft.println(F("Sun-Sun Park - Bus ETA"));
-    tft.setTextColor(C_UPD, HDR_BG);
-    tft.setCursor(4, 15);
-    tft.print(F("Upd: "));
-    tft.print(busData.getLastUpdateTime());
-
-    // 全清後，讓下一次 clockTick 一定要重印時鐘
-    clockNeedsRedraw = true;
-
-    // ── 統計行 ──
-    int west = busData.getCount(0);
-    int east = busData.getCount(1);
-    tft.setTextColor(C_WEST, TFT_BLACK);
-    tft.setCursor(4, 28);
-    tft.printf("WEST %-2d   ", west);
-    tft.setTextColor(C_EAST, TFT_BLACK);
-    tft.print(F("EAST "));
-    tft.print(east);
-
-    // ── 車次清單（東西向各取前 8 筆，依序上下排列）──
-    int y = 44;
-    int step = 13;
-    int shown = 0;
-    for (int d = 0; d < 2 && shown < 12; d++) {
-        int n = busData.getCount(d);
-        for (int i = 0; i < n && shown < 12; i++) {
-            const BusInfo* b = busData.getBusAt(d, i);
-            if (!b || y + step > tft.height()) break;
-            tft.setTextColor(d == 0 ? C_WEST : C_EAST, TFT_BLACK);
-            tft.setCursor(4, y);
-            tft.printf("%-9s %-3d", b->routeName.c_str(), b->estimateSecs / 60);
-            tft.setTextColor(C_LIST, TFT_BLACK);
-            tft.printf("  %s", b->timeStatus.c_str());
-            y += step;
-            shown++;
+// 處理觸控事件
+void handleTouch(TouchEvent ev) {
+    if (ev.type == TOUCH_SWIPE_LEFT) {
+        if (currentPage == PAGE_DASHBOARD) {
+            pendingPage = PAGE_SLIDESHOW;
+            pageSwitchPending = true;
+        } else if (currentPage == PAGE_SLIDESHOW) {
+            slideshow.prev();
+            ui.setPhotoDirty();
         }
     }
-    if (shown == 0) {
-        tft.setTextColor(0x5555, TFT_BLACK);
-        tft.setCursor(4, 44);
-        tft.println(F("No bus data"));
+    else if (ev.type == TOUCH_SWIPE_RIGHT) {
+        if (currentPage == PAGE_SLIDESHOW) {
+            pendingPage = PAGE_DASHBOARD;
+            pageSwitchPending = true;
+        }
     }
-}
-
-void drawWxStrip() {
-    int y = tft.height() - 38;
-    tft.fillRect(0, y, tft.width(), 38, WX_BG);
-    tft.drawLine(0, y, tft.width(), y, 0x4080F0);
-
-    if (!wx.isValid()) {
-        tft.setTextColor(C_WX_DIM, WX_BG);
-        tft.setTextSize(1);
-        tft.setCursor(4, y + 4);
-        tft.println(F("Weather: --   H--/L--"));
-        tft.setCursor(4, y + 18);
-        tft.println(F("AQI --  Hum --%  Wind --"));
-        return;
+    else if (ev.type == TOUCH_TAP) {
+        if (currentPage == PAGE_DASHBOARD) {
+            if (ui.inInfoBtn(ev.x, ev.y)) {
+                pendingPage = PAGE_SYSTEM;
+                pageSwitchPending = true;
+                Serial.println("[UI] (i) → SYSTEM");
+            }
+        }
+        else if (currentPage == PAGE_SLIDESHOW) {
+            if (ui.inInfoBtn(ev.x, ev.y)) {
+                pendingPage = PAGE_SYSTEM;
+                pageSwitchPending = true;
+            }
+            else if (ui.inPhoto(ev.x, ev.y)) {
+                slideshow.togglePause();
+                Serial.printf("[UI] slideshow paused=%d\n", slideshow.isPaused());
+            }
+        }
+        else if (currentPage == PAGE_SYSTEM) {
+            if (ui.inSystemClose(ev.x, ev.y)) {
+                pendingPage = PAGE_DASHBOARD;
+                pageSwitchPending = true;
+                Serial.println("[UI] × → DASHBOARD");
+            }
+        }
     }
-
-    tft.setTextSize(1);
-    tft.setTextColor(C_WX, WX_BG);
-    tft.setCursor(4, y + 4);
-    tft.printf("%3dC  %s  H%d/L%d",
-               wx.getTemp(), wx.getWxText().c_str(), wx.getWxHigh(), wx.getWxLow());
-    tft.setCursor(4, y + 18);
-    tft.printf("AQI %-3d  Hum %-3d%%  Wind %d",
-               wx.getAqi(), wx.getHum(), wx.getWind());
 }
 
 void doFetchAndShow() {
     // 一次抓回所有新新公園站牌（22 支 StopUID 各自回報各自路線）
     String all = tdx.fetchBusETAByName(TARGET_STOP_NAME);
     busData.parseTDXResponse(all);
-    drawScreen();
-    drawWxStrip();
-    clockNeedsRedraw = true;
-    Serial.printf("[TDX] fetched, total=%d\n", busData.getTotalCount());
+    ui.setBusDirty();
+    ui.setMarqueeDirty();
+    // 公車資料更新，跑馬燈同步；主畫面公車列局部重繪
+    Serial.printf("[TDX] fetched, total=%d, calls=%d, data=%.1fKB\n",
+                  busData.getTotalCount(), tdx.getCallCount(), tdx.getDataUsedKB());
 }
 
 void setup() {
     Serial.begin(115200);
     delay(300);
-    Serial.println("\n=== HW-950 Bus ETA ===");
+    Serial.println("\n=== HW-950 Bus ETA v2 ===");
 #ifdef FW_VERSION
     Serial.printf("[info] fw=%s build=%s\n", FW_VERSION, __DATE__);
 #endif
@@ -239,18 +167,23 @@ void setup() {
     ledcWrite(0, 255); ledcWrite(1, 255); ledcWrite(2, 255); // 全滅
     delay(200);
 
-#ifdef FW_VERSION
-    tft.setTextColor(C_WX_DIM, TFT_BLACK);
+    // 開機畫面：Repo 標題
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.setTextSize(2);  // FONT4
+    tft.setCursor(20, 50);
+    tft.println(F("ESP32 Bus ETA"));
     tft.setTextSize(1);
-    tft.setCursor(0, tft.height() - 8);
-    tft.printf("%s %s", FW_VERSION, __DATE__);
-#endif
+    tft.setTextColor(0x5555, TFT_BLACK);
+    tft.setCursor(20, 85);
+    tft.println(F("HW-950  ILI9341"));
+    tft.setCursor(20, 100);
+    tft.println(F("TDX + open-meteo"));
 
     // 連線中：快閃
     led.setState(LED_FAST);
-    tft.setTextColor(C_UPD, TFT_BLACK);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
     tft.setTextSize(1);
-    tft.setCursor(5, 5);
+    tft.setCursor(20, 130);
     tft.println(F("Connecting WiFi..."));
 
     // Wi-Fi
@@ -262,17 +195,17 @@ void setup() {
         delay(2000);
         led.tick(millis());
         if (tries % 5 == 0) {
-            tft.fillRect(5, 20, tft.width() - 10, 16, TFT_BLACK);
-            tft.setCursor(5, 20);
+            tft.fillRect(20, 145, tft.width() - 40, 16, TFT_BLACK);
+            tft.setCursor(20, 145);
             tft.printf("retry %d ...\n", tries / 5);
         }
     }
 
     if (wifi.isConnected()) {
         String ip = wifi.getIP();
-        tft.fillRect(5, 20, tft.width() - 10, 16, TFT_BLACK);
+        tft.fillRect(20, 130, tft.width() - 40, 40, TFT_BLACK);
         tft.setTextColor(TFT_GREEN, TFT_BLACK);
-        tft.setCursor(5, 20);
+        tft.setCursor(20, 130);
         tft.print(F("IP: "));
         tft.println(ip);
         Serial.printf("Connected, IP=%s\n", ip.c_str());
@@ -286,7 +219,6 @@ void setup() {
 
         // 開機就抓一次氣象/AQI（不等 10 min），讓底部條立刻有內容
         if (wx.fetchAll()) {
-            drawWxStrip();
             Serial.printf("[WX] initial fetch OK, temp=%d aqi=%d\n", wx.getTemp(), wx.getAqi());
         } else {
             Serial.println("[WX] initial fetch failed, retry in 10 min");
@@ -297,26 +229,28 @@ void setup() {
         bool sdOk = sd.begin();
         if (sdOk) {
             Serial.println("[SD] Ready");
-            tft.setTextColor(TFT_GREEN, TFT_BLACK);
         } else {
             Serial.println("[SD] Not available (continue without SD)");
-            tft.setTextColor(TFT_RED, TFT_BLACK);
         }
-        tft.setTextSize(1);
-        tft.setCursor(5, 40);
-        tft.printf("SD: %s", sdOk ? "OK" : "NO CARD");
 
         // 初始化光感電阻自動背光
         ldr.begin();
+
+        // 初始化 UI Manager
+        ui.begin(&tft, &busData, &wx, &wifi, &tdx, &sd, &ldr);
+        ui.setSlideshowSource(&slideshow);
+
+        // 初始化 Slideshow
+        slideshow.begin(&tft);
 
         // 上電先抓一次公車
         doFetchAndShow();
         lastFetchMs = millis();
         led.setState(LED_HEARTBEAT);
     } else {
-        tft.fillRect(5, 20, tft.width() - 10, 16, TFT_BLACK);
+        tft.fillRect(20, 130, tft.width() - 40, 40, TFT_BLACK);
         tft.setTextColor(TFT_RED, TFT_BLACK);
-        tft.setCursor(5, 20);
+        tft.setCursor(20, 130);
         tft.println(F("WiFi failed"));
         Serial.println("[FATAL] Wi-Fi 連線失敗");
         led.setState(LED_RED_ON);
@@ -325,10 +259,25 @@ void setup() {
 }
 
 void loop() {
+    unsigned long now = millis();
+
     wifi.loop();
-    led.tick(millis());
-    ldr.tick(millis());
-    clockTick(millis());
+    led.tick(now);
+    ldr.tick(now);
+
+    // Touch handling
+    TouchEvent ev = touch.read();
+    if (ev.type != TOUCH_NONE) {
+        handleTouch(ev);
+    }
+
+    // Page switch handling
+    if (pageSwitchPending) {
+        currentPage = pendingPage;
+        pageSwitchPending = false;
+        ui.requestFullRedraw();
+        Serial.printf("[UI] Switch to page %d\n", currentPage);
+    }
 
     // 斷線：紅燈常亮
     if (!wifi.isConnected()) {
@@ -338,24 +287,50 @@ void loop() {
     }
 
     // 定期 NTP 重對時
-    if (wifi.isConnected() && millis() - lastNtpMs >= NTP_REFRESH_MS) {
+    if (wifi.isConnected() && now - lastNtpMs >= NTP_REFRESH_MS) {
         syncTime();
     }
 
-    unsigned long now = millis();
+    // 定期抓公車資料 (60s)
     if (wifi.isConnected() && now - lastFetchMs >= (unsigned long)REFRESH_INTERVAL_S * 1000) {
         lastFetchMs = now;
         doFetchAndShow();
     }
-    // 气象/AQI 与公交车分开计时
+
+    // 氣象/AQI 10 min
     if (wifi.isConnected() && now - lastWxMs >= WX_REFRESH_MS) {
         lastWxMs = now;
         if (wx.fetchAll()) {
-            // 局部重绘气象条 + 时钟（公交车 60s 会全清一次，所以这里也重置时钟 flag）
-            drawWxStrip();
-            clockNeedsRedraw = true;
-            clockTick(millis());
+            ui.setWeatherDirty();
+            ui.setMarqueeDirty();
         }
     }
+
+    // Slideshow auto-advance
+    slideshow.tick(now);
+
+    // --- Rendering ---
+
+    // 頁面切換全重繪
+    if (ui.fullRedrawNeeded) {
+        ui.drawPage(currentPage);
+    }
+
+    // 各頁局部更新
+    if (currentPage == PAGE_DASHBOARD) {
+        ui.updateClock();
+        if (ui.busListDirty) ui.updateBusList();   // 含自動捲動
+        if (ui.weatherDirty) ui.requestFullRedraw(); // 天氣條重繪需連圖標一起重畫
+    }
+    else if (currentPage == PAGE_SLIDESHOW) {
+        ui.updateClock();
+        ui.updateMarquee();
+        if (ui.photoDirty) ui.updateSlideshowPhoto();
+    }
+    else if (currentPage == PAGE_SYSTEM) {
+        // 系統頁無動態，進頁時已全繪；NTP 到點順帶更新日期
+        ui.updateClock();
+    }
+
     delay(50);
 }
