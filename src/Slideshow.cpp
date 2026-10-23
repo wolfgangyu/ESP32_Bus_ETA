@@ -5,6 +5,7 @@
 #include "Slideshow.h"
 #include "config.h"
 #include <SPI.h>
+#include <TJpg_Decoder.h>   // 串流解碼 drawSdJpg()/getSdJpgSize()
 
 const char* Slideshow::VALID_EXTENSIONS[] = {".jpg", ".jpeg", ".JPG", ".JPEG"};
 const int Slideshow::VALID_EXT_COUNT = 4;
@@ -18,14 +19,8 @@ Slideshow::~Slideshow() {
 void Slideshow::begin(TFT_eSPI* tftPtr) {
     tft = tftPtr;
 
-    // Allocate JPEG buffer
-    jpgBuffer = (uint8_t*)malloc(MAX_JPG_SIZE);
-    if (!jpgBuffer) {
-        #ifdef DEBUG_SERIAL
-        Serial.println("[Slideshow] Failed to allocate JPEG buffer");
-        #endif
-        return;
-    }
+    // 不再預先配置 200KB JPEG 緩衝：改用 TJpgDec.drawSdJpg() 串流解碼，
+    // 開機時 WiFi 已佔用大量 heap，200KB 連續記憶體必配置失敗。
 
     // Open /photos directory
     photoDir = SD.open("/photos");
@@ -82,10 +77,6 @@ void Slideshow::begin(TFT_eSPI* tftPtr) {
 }
 
 void Slideshow::end() {
-    if (jpgBuffer) {
-        free(jpgBuffer);
-        jpgBuffer = nullptr;
-    }
     if (photos) {
         delete[] photos;
         photos = nullptr;
@@ -164,14 +155,7 @@ bool Slideshow::loadPhotoInfo(const char* path, PhotoInfo& info) {
     if (!file) return false;
 
     info.fileSize = file.size();
-    if (info.fileSize > MAX_JPG_SIZE) {
-        #ifdef DEBUG_SERIAL
-        Serial.printf("[Slideshow] %s too large: %u bytes (max %u)\n",
-                      path, info.fileSize, MAX_JPG_SIZE);
-        #endif
-        file.close();
-        return false;
-    }
+    // 串流解碼不需要檔案大小上限（不再預載整個 JPEG 到 RAM）
 
     strncpy(info.filename, path, sizeof(info.filename) - 1);
     info.filename[sizeof(info.filename) - 1] = '\0';
@@ -212,41 +196,36 @@ const char* Slideshow::getCurrentFilename() const {
     return photos[currentIndex].filename;
 }
 
-bool Slideshow::getCurrentPhoto(uint8_t*& outBuf, size_t& outLen, int& outW, int& outH) {
-    if (photoCount == 0 || currentIndex < 0 || currentIndex >= photoCount) {
-        return false;
-    }
+// 串流解碼繪製：邊讀 SD 邊解，不需把整個 JPEG 載入 RAM
+bool Slideshow::drawCurrent(int x, int y, int maxW, int maxH) {
+    if (photoCount == 0 || currentIndex < 0 || currentIndex >= photoCount) return false;
+    const char* path = photos[currentIndex].filename;
 
-    const PhotoInfo& info = photos[currentIndex];
-    outW = info.width;
-    outH = info.height;
-
-    File file = SD.open(info.filename, FILE_READ);
-    if (!file) {
+    // 先讀 header 取得尺寸，決定降採樣倍率（1/1、1/2、1/4、1/8）
+    uint16_t w = 0, h = 0;
+    if (TJpgDec.getSdJpgSize(&w, &h, path) != JDR_OK || w == 0 || h == 0) {
         #ifdef DEBUG_SERIAL
-        Serial.printf("[Slideshow] Failed to open: %s\n", info.filename);
+        Serial.printf("[Slideshow] Header read failed: %s\n", path);
         #endif
         return false;
     }
 
-    size_t len = file.size();
-    if (len > MAX_JPG_SIZE) {
-        file.close();
-        return false;
-    }
+    uint8_t scale = 0;   // 0=1/1, 1=1/2, 2=1/4, 3=1/8
+    while (scale < 3 && (((int)w >> scale) > maxW || ((int)h >> scale) > maxH)) scale++;
+    TJpgDec.setJpgScale(1 << scale);
 
-    size_t read = file.read(jpgBuffer, len);
-    file.close();
+    int dw = (int)w >> scale;
+    int dh = (int)h >> scale;
+    int dx = x + (maxW - dw) / 2;
+    int dy = y + (maxH - dh) / 2;
 
-    if (read != len) {
+    JRESULT r = TJpgDec.drawSdJpg(dx, dy, path);
+    if (r != JDR_OK) {
         #ifdef DEBUG_SERIAL
-        Serial.printf("[Slideshow] Short read: %u/%u\n", read, len);
+        Serial.printf("[Slideshow] drawSdJpg failed (%d): %s\n", (int)r, path);
         #endif
         return false;
     }
-
-    outBuf = jpgBuffer;
-    outLen = len;
     return true;
 }
 

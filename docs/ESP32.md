@@ -1,7 +1,7 @@
 ﻿# HW-950 ESP32 開發板 — 確認硬體規格
 
 > 專案：ESP32 公車到站提示系統
-> 最後確認：2026-10-18（觸控、LED 三態、SD 卡、光感自動背光 全部跑通）
+> 最後確認：2026-10-23（v1.0.0：觸控、LED 三態、SD 卡、光感自動背光、UI 定版 全部跑通）
 > 來源：官方 spec PDF（bitbyg.dk ESP32-2432S024）＋實測驗證
 
 ---
@@ -107,19 +107,35 @@ if (!touchInitialized && millis() - touchInitTime >= 3000) {
 }
 ```
 
-### 6.2 觸控庫選擇：獨立 XPT2046 Driver
+### 6.2 觸控庫選擇：TFT_eSPI 內建 XPT2046（v1.0.0 定案）
 
-**不使用** TFT_eSPI 內建觸控，改用獨立庫 `median-dispersion/XPT2046 Driver`：
+**使用** TFT_eSPI 內建觸控（`TOUCH_CS=33` + `TOUCH_DRIVER=1`）：
 
 | 項目 | 說明 |
 |------|------|
-| Library | `median-dispersion/XPT2046 Driver@^1.0.2` |
-| 腳位 | CS=33, CLK=25, MOSI=32, MISO=39, IRQ=36 |
-| SPI | 共用螢幕 SPI 總線 (SCK=14, MOSI=13, MISO=12)，僅 CS 分開 |
-| 初始化 | `ts->begin(); ts->setRotation(1);` |
-| 讀取 | `ts->touched()` + `ts->getTouchPosition()` |
+| 驅動 | TFT_eSPI 內建（`-D TOUCH_CS=33`、`-D TOUCH_DRIVER=1`）|
+| 腳位 | **只多一支 CS=33**；SCK/MOSI/MISO 與螢幕共用（14/13/12）|
+| 校準 | `tft.setTouch(calData[5])`，5 值順序 `x0, x1, y0, y1, flags`；本板 flags=0 |
+| 讀取 | `tft.getTouch(&x, &y, 600)`，回傳已校準+旋轉的邏輯座標 |
 
-**優點**：分工明確、不干擾 TFT_eSPI、穩定度高、易除錯。
+> ⚠️ 文件早期寫「觸控獨立 VSPI (CLK=25, MOSI=32, MISO=39)」是**錯的** —
+> 實際上 XPT2046 與螢幕共用同一組 SPI 腳位，只是 CS 不同。
+
+**踩過的兩個坑（v1.0.0 修正）：**
+
+1. **手動 SPI 讀 XPT2046 暫存器不可行** —— 在這塊板永遠回 0。不可取代 `getTouch()`。
+2. **SD 卡搶走 VSPI** —— TFT_eSPI 在 ESP32 預設用 VSPI 物件，而 `SDManager`
+   又 `new SPIClass(VSPI)` + `begin(18,19,23,5)`，把同一個周邊重新接線到 SD 的腳位，
+   於是觸控的讀取被送到 18/19/23（XPT2046 不在那裡）→ 永遠讀不到。
+   **解法：`-D USE_HSPI_PORT=1`，讓 TFT+觸控走 HSPI，VSPI 完整留給 SD。**
+
+3. **`getTouch()` 是非阻塞的**：沒人碰螢幕時本來就回 `pressed=0`，
+   不能用「一直是 0」推論「觸控壞了」。要驗證必須實際按壓，
+   或跑獨立測試韌體 `touch_test/`。
+
+4. **`touch.begin()` 必須傳 tft**：`touch.begin(&tft)`。
+   漏傳的話 TouchManager 拿不到 `TFT_eSPI*`，`initialized` 不會成立，
+   `read()` 永遠回 `TOUCH_NONE`（點擊完全沒反應，且不會有任何錯誤訊息）。
 
 ### 6.3 Boot Loop 根因與解決
 
@@ -179,3 +195,4 @@ void loop() {
 | 2026-10-10 | 初版，驅動 IC 推測為 ST7789，白屏未解 |
 | 2026-10-17 | 依官方 spec PDF 確認驅動為 **ILI9341**、背光 27、init 需隔離觸控/SD CS；TFT_eSPI 跑通 |
 | 2026-10-18 | v0.2.0：啟用觸控、LED 三態、SD 卡、光感自動背光 |
+| 2026-10-23 | **v1.0.0**：觸控改用 TFT_eSPI 內建（見下）；TFT+觸控改走 **HSPI**，VSPI 完整留給 SD 卡（原本 SD 的 `SPI.begin(18,19,23,5)` 會把觸控讀取帶到錯腳位）；UI 定版（Splash 顯示對時時間、ETA 4 筆/頁、東/西各自 8 秒翻頁、Slideshow 全螢幕、夜間 01–05 不抓 TDX）；Slideshow 改串流解碼（不再配置 200KB）|

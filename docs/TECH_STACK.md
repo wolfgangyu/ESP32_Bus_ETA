@@ -4,7 +4,7 @@
 - **開發板**: HW-950 (ESP32-D0WD-V3, 2.4" ILI9341 TFT, CH340 USB)
 - **框架**: PlatformIO + Arduino (espressif32)
 - **螢幕**: 320×240, ILI9341, TFT_eSPI 驅動
-- **觸控**: XPT2046 (電阻式), VSPI 介面
+- **觸控**: XPT2046 (電阻式), 共用 HSPI 介面 (只多 CS=33)
 
 ---
 
@@ -15,7 +15,7 @@
 lib_deps = 
     lovyan03/LovyanGFX@^1.1.0      # 圖形庫 (TFT_eSPI 內部依賴)
     bblanchon/ArduinoJson@^6.21.2  # JSON 解析 (TDX API)
-    bodmer/TFT_eSPI@^2.5.43        # 主要顯示驅動
+    bodmer/TFT_eSPI@^2.5.43        # 主要顯示驅動 (內建 XPT2046 支援)
     bodmer/TJpg_Decoder@^1.0.0     # JPEG 解碼 (Slideshow)
 ```
 
@@ -42,14 +42,13 @@ lib_deps =
 | RST  | -1   | 硬體重置 |
 | BL   | 27   | 背光 PWM (共陰極) |
 
-### 觸控 (XPT2046) - VSPI
+### 觸控 (XPT2046) - 共用 HSPI
 | 功能 | GPIO | 備註 |
 |------|------|------|
-| SCK  | 25   | VSPI CLK |
-| MOSI | 32   | VSPI MOSI |
-| MISO | 39   | VSPI MISO (輸入) |
 | CS   | 33   | 觸控片選 |
 | IRQ  | 36   | 中斷 (輸入, 僅電平) |
+
+> **SCK/MOSI/MISO 與 TFT 共用 (14/13/12)，只多一支 CS=33**
 
 ### 其他
 | 功能 | GPIO | 備註 |
@@ -58,7 +57,10 @@ lib_deps =
 | LED 紅 | 4  | 共陰極 PWM |
 | LED 藍 | 16 | 共陰極 PWM |
 | LDR  | 34 | 光感 ADC (自動背光) |
-| SD CS | 5 | SD 卡片選 |
+| SD CS | 5 | SD 卡片選 (VSPI) |
+| SD SCK | 18 | VSPI CLK |
+| SD MOSI | 23 | VSPI MOSI |
+| SD MISO | 19 | VSPI MISO |
 
 ---
 
@@ -77,11 +79,22 @@ lib_deps =
 -D TFT_WIDTH=240
 -D TFT_HEIGHT=320
 -D SPI_FREQUENCY=20000000
+-D USE_HSPI_PORT=1
 -D LOAD_GLCD=1
 -D LOAD_FONT2=1
 -D SMOOTH_FONT=1
 -D LOAD_FONT4=1
+-D TOUCH_CS=33
+-D TOUCH_IRQ=36
+-D SPI_TOUCH_FREQUENCY=2500000
+-D TJPGD_LOAD_SD_LIBRARY=1
 ```
+
+> **`USE_HSPI_PORT=1` 是必要的**：TFT+觸控走 HSPI，VSPI (18/19/23) 完整留給 SD 卡，
+> 避免 SDManager 的 `SPI.begin()` 把觸控讀取帶到錯的腳位。
+
+> **`TJPGD_LOAD_SD_LIBRARY=1`**：啟用 `TJpgDec.drawSdJpg()` 串流解碼，
+> Slideshow 就不必預先配置 200KB 連續記憶體。
 
 ### 字型支援
 - **GLCD** (8px) - 系統資訊、小標籤
@@ -91,7 +104,7 @@ lib_deps =
 
 ---
 
-## 觸控現狀（已修復 2026-10-23）
+## 觸控現狀（v1.0.0 已修復）
 
 ### 目前實作
 - **TFT_eSPI 內建 XPT2046 支援**：`tft.setTouch(calData)` + `tft.getTouch(&x, &y, 600)`
@@ -131,7 +144,7 @@ lib_deps =
 
 ---
 
-## 畫面架構與分頁規格 (v7 更新)
+## 畫面架構與分頁規格 (v1.0.0)
 
 ### 頁面配置 (LayoutMetrics)
 ```cpp
@@ -141,33 +154,20 @@ listTop = 40          // 公車區起始 Y
 listBottom = 240      // 公車區結束 Y
 rowH = 44             // 單行高度 (含間距)
 dirLabelH = 20        // 方向標籤高度
-visibleRows = 4       // 每頁顯示行數 (實際可見 4 行，每頁 3 筆)
-maxRows = 8           // 單向最多行數
-photoTop = 40         // Slideshow 相片起始 Y
-photoH = 200          // Slideshow 相片高度 (全螢幕減去天氣列)
+visibleRows = 4       // 每頁顯示 4 行，每頁 4 筆
+photoTop = 0          // Slideshow 全螢幕 0..240
+photoH = 240          // Slideshow 全螢幕高度
 ```
 
-### 公車分頁 (v7 新規格)
-- **每頁項目**: 3 筆 (西向+東向合併排序，依 ETA 排序)
-- **自動翻頁**: 5 秒/頁 (從 10 秒縮短)
-- **總頁數**: `(總筆數 + 2) / 3` (無條件進位)
-- **頁碼顯示**: 右上角 "1/5" 格式
-
-### 分頁動畫
-- **自動翻頁間隔**: 5 秒 (原 10 秒)
-- **CSS 動畫**: 10s 循環，每頁停留 ~3.3 秒
-- **手動翻頁**: 點擊公車列表區循環翻頁
-
-### 公車分頁（v7.1 規格，已實作並驗證）
-- **每頁項目**：3 筆（`ITEMS_PER_PAGE = 3`）
-- **自動翻頁**：**每 8 秒**切下一頁（`BUS_PAGE_MS = 8000`）
-- **觸發條件**：**東向、西向各自獨立判斷**，該方向**筆數 > 3 才啟用**
-  - `≤ 3 筆`：固定在該方向第 1 頁，不翻頁
-  - `> 3 筆`：`頁數 = ceil(筆數 / 3)`，8 秒循環換頁
+### 公車分頁 (v1.0.0 新規格)
+- **每頁項目**: 4 筆 (`ITEMS_PER_PAGE = 4`；4×44px = 176px，剛好填滿列表區)
+- **自動翻頁**: 每 8 秒切 1 頁 (`BUS_PAGE_MS = 8000`)
+- **觸發條件**: **東向、西向各自獨立判斷**，該方向**筆數 > 4 才啟用**
+  - `≤ 4 筆`：固定在該方向第 1 頁，不翻頁
+  - `> 4 筆`：`頁數 = ceil(筆數 / 4)`，8 秒循環換頁
 - **兩向互不干擾**：可能出現西向在第 2 頁、東向還在第 1 頁
 - **頁碼顯示**：`W:x/y  E:x/y`，僅在任一方向頁數 > 1 時顯示
 - **實測 log**：
-
 ```
 [UI] EAST page -> 2/2      ← 東向 >3 筆，翻頁
 （西向 ≤3 筆，無翻頁 log）  ← 條件判斷正確
@@ -187,14 +187,15 @@ photoH = 200          // Slideshow 相片高度 (全螢幕減去天氣列)
 - 判斷式：`tm_hour >= 1 && tm_hour < 5`
 - **NTP 未對時時 `getLocalTime()` 回 false → 視為非夜間，照常抓資料**（安全預設）
 
-### Slideshow（v7.1）
+### Slideshow（v1.0.0）
 - **全螢幕**：`0..320 × 0..240`，**不保留天氣列、無跑馬燈**
 - 相片等比縮放置中，`maxW = screenW-4`、`maxH = screenH-4`
 - 無相片時顯示 `NO PHOTO` / `Put JPG on SD` 佔位框
+- 串流解碼：`TJpgDec.drawSdJpg()`，不佔用大量 RAM
 
 ---
 
-## 狀態機 (簡化為 3 頁)
+## 狀態機 (3 頁)
 
 ```cpp
 enum Page {
@@ -206,20 +207,19 @@ enum Page {
 
 ### 頁面流程
 ```
-啟動 → Splash (3秒) → Page 0 (ETA)
-                          ↓ 點擊底部 / 左滑
-                       Page 1 (Slideshow)
-                          ↓ 任意點擊 / 右滑
-                       Page 0 (ETA)
+啟動 → Splash (3秒, 顯示 IP + NTP 時間) → Page 0 (ETA)
+                                      ↓ 點擊 / 左滑
+                                   Page 1 (Slideshow)
+                                      ↓ 任意點擊 / 右滑
+                                   Page 0 (ETA)
 ```
 
-### 互動邏輯 (v7)
+### 互動邏輯 (v1.0.0)
 
 | 當前頁面 | 觸控動作 | 結果 |
 |---------|---------|------|
 | Splash (3秒) | 自動 | → Page 0 ETA |
-| Page 0 ETA | 點擊底部區域 (y > 200) | → Page 1 Slideshow |
-| Page 0 ETA | 左滑 | → Page 1 Slideshow |
+| Page 0 ETA | 點擊 / 左滑 | → Page 1 Slideshow |
 | Page 0 ETA | 點擊公車列表 | 手動翻頁 (循環) |
 | Page 0 ETA | 長按天氣列 (y < 40) | → Calibration 頁 |
 | Page 1 Slideshow | 任意點擊 | → Page 0 ETA |
@@ -231,18 +231,18 @@ enum Page {
 ## Splash 畫面規格 (3秒)
 
 ```
-┌─────────────────────┐
-│   ESP32 Bus ETA     │  ← 18px 標題
-│   HW-950  ILI9341   │  ← 10px 副標題
-│                     │
-│   SD Card: OK 7.4 GB │  ← 綠字 OK / 紅字 NOT FOUND
-│                     │
-│   FW: v0.2.0        │  ← Firmware 版本
-│   Build: 2026/10/21 │  ← Build 日期
-│                     │
-│   Loading...        │  ← 底部提示
-└─────────────────────┘
+┌─────────────────────────────┐
+│  BUS ETA                    │  ← 16px 標題
+│  ────────────────────────── │  ← 綠色分隔線
+│  IP: 192.168.x.x            │  ← 8px IP (WiFi 連線後)
+│  2026-10-23 14:30:25        │  ← 8px 時間 (NTP 同步後更新)
+└─────────────────────────────┘
 ```
+
+- **3秒**後自動跳到 Page 0
+- 每 **500ms** 重畫一次，NTP 一對到時就立刻顯示時間
+- `main.cpp` 的 `setup()` 負責顯示「連線中...」→ IP → 「Syncing NTP...」
+- `UIManager::drawSplashScreen()` 負責 3 秒靜態內容 + 動態時間刷新
 
 ---
 
@@ -270,7 +270,7 @@ TDX API (HTTPS)
 
 ---
 
-## 記憶體使用（v7.1 實測）
+## 記憶體使用（v1.0.0 實測）
 
 - **RAM**: ~57.3 KB / 320 KB (17.5%)
 - **Flash**: ~1.38 MB / 4 MB (34.0%)
@@ -279,33 +279,39 @@ TDX API (HTTPS)
 
 ## 已知問題
 
-1. **Slideshow JPEG 緩衝區配置失敗** — `[Slideshow] Failed to allocate JPEG buffer`，
-   開機時配置失敗（記憶體不足）；相片輪播目前顯示 `NO PHOTO` 佔位框
-2. **NTP 偶爾同步失敗** — 開機時 `[NTP] sync failed`，之後每小時會重試
-3. **公車資料偶爾為 0 筆** — TDX 回傳格式變動，需防禦性解析
-4. **夜間暫停期間畫面停在舊資料** — 設計如此（保留最後一次資料），若想要清空需再改
+1. **NTP 偶爾同步失敗** — 開機時 `[NTP] sync failed`，之後每小時會重試；
+   Splash 此時顯示 `--:--`（轉暗）
+2. **公車資料偶爾為 0 筆** — TDX 回傳格式變動，需防禦性解析
+3. **夜間暫停期間畫面停在舊資料** — 設計如此（保留最後一次資料）
 
-### 已解決
-- ~~觸控完全失效~~ → 還原 TFT_eSPI `getTouch()` + 校準值，實測正常
-- ~~ETA 不會自動翻頁~~ → `updateBusList()` 改為每輪呼叫
+### 已解決（v1.0.0）
+- ~~觸控完全失效~~ → 兩個原因：手動 SPI 讀值不可行 + SD 搶走 VSPI。
+  改用 TFT_eSPI 內建 `getTouch()` + `-D USE_HSPI_PORT=1`
+- ~~點擊完全沒反應~~ → `touch.begin()` 漏傳 `&tft`，`initialized` 從未成立
+- ~~ETA 不會自動翻頁~~ → `updateBusList()` 原本只在 dirty 時呼叫，計時器永不觸發
 - ~~Slideshow 保留天氣列/跑馬燈~~ → 改為全螢幕
+- ~~Slideshow JPEG 緩衝區配置失敗~~ → 改用 `TJpgDec.drawSdJpg()` 串流解碼，
+  不再需要 200KB 連續記憶體
+- ~~首次載入資料後立即翻頁~~ → `UIManager::begin()` 初始化 `lastBusPageMs` = `millis()`
 
 ---
 
-## UI 規範摘要 (v7.1)
+## UI 規範摘要 (v1.0.0)
 
 | 項目 | 規格 |
 |------|------|
 | 螢幕解析度 | 320×240 (橫向) |
-| Splash | 3 秒，SD 狀態 + FW/Build 版本 |
+| Splash | 3 秒，IP + NTP 時間 (每 500ms 更新) |
 | 天氣列高度 | 40px |
 | 天氣列左側 | 圖標 22×22、溫度 18px、短名+AQI+RH、L/H |
-| 天氣列右側 | 時鐘 24px @ y=2、日期 8px @ y=24 |
+| 天氣列右側 | 時鐘 24px @ y=4、日期 8px @ y=26 |
 | 公車列表區 | 40px~240px (200px)，左右各 160px |
-| 每頁筆數 | 3 筆（東/西**各自**分頁） |
+| 每頁筆數 | 4 筆（東/西**各自**分頁） |
 | 行高 | 44px (含間距) |
 | 路線／ETA 字體 | Font 4 (26px) + `min` 8px |
-| 自動翻頁 | 8 秒/頁，**該方向 >3 筆才啟用** |
+| 時鐘字體 | Font 4 (24px) @ y=4，日期 GLCD 8px @ y=26 |
+| min 標籤 | 下移 1px |
+| 自動翻頁 | 8 秒/頁，**該方向 >4 筆才啟用** |
 | 頁碼位置 | 右上角 `W:x/y E:x/y` |
 | Slideshow | **全螢幕 320×240**，無天氣列、無跑馬燈 |
 | 夜間暫停 | 01:00–05:00 不抓 TDX，顯示 `NIGHT PAUSE` |
@@ -315,11 +321,10 @@ TDX API (HTTPS)
 
 ## 開發待辦
 
-- [ ] 修 Slideshow JPEG 緩衝區配置失敗（可考慮降低 `JPG_SCALE` 或縮小緩衝）
 - [ ] NTP 同步失敗重試機制
 - [ ] TDX 回傳格式防禦性解析
-- [ ] 把 `touch_test/` 的 4 點校準結果寫回 NVS，取代 `config_local.h` 寫死值
+- [ ] 把校準結果寫回 NVS，取代 `config_local.h` 寫死值
 
 ---
 
-*文件更新: 2026-10-23 (v7.1：觸控修復、8 秒分頁、夜間暫停、全螢幕 Slideshow)*
+*文件更新: 2026-10-23 (v1.0.0：觸控修復、8 秒分頁、夜間暫停、全螢幕 Slideshow、Splash 顯示 NTP 時間)*

@@ -18,7 +18,14 @@ void TouchManager::begin(TFT_eSPI* tftPtr) {
     if (tftPtr) {
         tft = tftPtr;
     }
-    if (tft) {
+    if (!tft) {
+        // 沒拿到 tft 就沒辦法 getTouch()。靜默失敗會讓「點擊沒反應」極難查，
+        // 所以這裡直接喊出來。
+        Serial.println("[Touch] ERROR: begin() called without TFT_eSPI pointer - touch disabled");
+        initialized = false;
+        return;
+    }
+    {
         uint16_t calData[5] = {
             (uint16_t)TOUCH_CAL_X0,
             (uint16_t)TOUCH_CAL_X1,
@@ -49,11 +56,19 @@ TouchEvent TouchManager::read() {
     // getTouch 回傳邏輯座標（已校準+旋轉，0..width / 0..height），直接用
     uint16_t lx = 0, ly = 0;
     bool pressed = tft->getTouch(&lx, &ly, 600);
-    int x = pressed ? lx : 0;
-    int y = pressed ? ly : 0;
-    // clamp 保險
-    x = max(0, min((int)tft->width() - 1, x));
-    y = max(0, min((int)tft->height() - 1, y));
+
+    // 放開時 getTouch() 回 0,0，不能拿它算位移或當事件座標，
+    // 否則每次放開都會被誤判成「滑動」且座標為 (0,0)。
+    int x, y;
+    if (pressed) {
+        x = max(0, min((int)tft->width() - 1, (int)lx));
+        y = max(0, min((int)tft->height() - 1, (int)ly));
+        lastX = x;
+        lastY = y;
+    } else {
+        x = lastX;   // 沿用最後一次按住的座標
+        y = lastY;
+    }
 
     event.x = x;
     event.y = y;
@@ -86,9 +101,7 @@ TouchEvent TouchManager::read() {
         } else if (dy > dx && dy > MOVE_THRESHOLD) {
             event.type = (y < pressStartY) ? TOUCH_SWIPE_UP : TOUCH_SWIPE_DOWN;
         }
-
-        event.x = x;
-        event.y = y;
+        // event.x/y 已是放開前最後位置
     }
 
     wasPressed = pressed;

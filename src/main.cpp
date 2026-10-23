@@ -83,12 +83,10 @@ void syncTime() {
 void handleTouch(TouchEvent ev) {
     if (ev.type == TOUCH_TAP) {
         if (currentPage == PAGE_DASHBOARD) {
-            // Page 0: 點擊底部區域 (y > 200) 切換到 Slideshow
-            if (ev.y > 200) {
-                pendingPage = PAGE_SLIDESHOW;
-                pageSwitchPending = true;
-                Serial.println("[UI] Tap bottom -> SLIDESHOW");
-            }
+            // Page 0: 點螢幕任一處 → Slideshow（(i) 已移除，畫面沒有其他可點的東西）
+            pendingPage = PAGE_SLIDESHOW;
+            pageSwitchPending = true;
+            Serial.printf("[UI] Tap (%d,%d) -> SLIDESHOW\n", ev.x, ev.y);
         } else if (currentPage == PAGE_SLIDESHOW) {
             // Page 1: 任意點擊返回 Dashboard
             pendingPage = PAGE_DASHBOARD;
@@ -216,8 +214,12 @@ void setup() {
     delay(1200);
     Serial.println("[DBG] After WiFi delay");
 
-    // NTP 對時
+    // NTP 對時 - 顯示連線標準局
     Serial.println("Syncing NTP...");
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setTextSize(1);
+    tft.setCursor(20, 155);
+    tft.println(F("Syncing NTP..."));
     syncTime();
     Serial.println("[DBG] After NTP");
 
@@ -276,23 +278,28 @@ void loop() {
     ldr.tick(now);
 
     // Splash 畫面處理 (3秒後自動結束)
-    if (!splashFinished && ui.isShowingSplash()) {
+    if (!splashFinished) {
         if (now - ui.getSplashStartMs() >= 3000) {
-            ui.setShowSplash(false);
             splashFinished = true;
             ui.requestFullRedraw();
+        } else {
+            // 每 500ms 重畫一次：NTP 一對到時就立刻把時間顯示出來
+            static unsigned long lastSplashMs = 0;
+            if (now - lastSplashMs >= 500) {
+                lastSplashMs = now;
+                ui.requestFullRedraw();
+            }
         }
-        // Splash 期間也要更新畫面
-        if (ui.fullRedrawNeeded) {
-            ui.drawPage(PAGE_DASHBOARD);
+        if (!splashFinished) {
+            ui.drawSplashScreen();
         }
     }
 
     // 延遲初始化觸控 (等系統穩定 3 秒後)
     if (!touchInitialized && now - touchInitTime >= 3000) {
-        touch.begin();
+        touch.begin(&tft);   // 必須傳 tft：TouchManager 靠它做 getTouch()
         touchInitialized = true;
-        Serial.println("[TOUCH] Direct SPI touch initialized");
+        Serial.println("[TOUCH] TFT_eSPI touch initialized");
     }
 
     // Touch handling (只在初始化後)
@@ -302,6 +309,14 @@ void loop() {
             Serial.printf("[TOUCH] ev.type=%d x=%d y=%d z=%d\n", ev.type, ev.x, ev.y, ev.z);
             handleTouch(ev);
         }
+    }
+
+    // 實際切換頁面（handleTouch 只設旗標，這裡才動 currentPage）
+    if (pageSwitchPending) {
+        pageSwitchPending = false;
+        currentPage = pendingPage;
+        ui.requestFullRedraw();
+        Serial.printf("[UI] -> page %d\n", (int)currentPage);
     }
 
     // 夜間暫停 TDX (01:00-05:00)：不抓資料，畫面顯示提示

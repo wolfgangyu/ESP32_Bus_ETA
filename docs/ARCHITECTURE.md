@@ -2,7 +2,7 @@
 
 > 對應程式碼：`src/` 正式模組（main / WiFiManager / TDXClient / BusData / TouchManager / WxManager / UIManager / Slideshow / LEDManager / SDManager / LightSensor）
 > 硬體腳位唯一事實來源：[docs/ESP32.md](ESP32.md)（本檔不再重述腳位）
-> 最後更新：2026-10-21（觸控整合完成、Boot Loop 解決、TDX HTTPS 穩定、open-meteo HTTP、XPT2046 Driver 採用）
+> 最後更新：2026-10-23（v1.0.0：觸控整合完成、UI 定版、Splash 顯示 NTP 時間、8 秒分頁、夜間暫停、全螢幕 Slideshow）
 
 ---
 
@@ -20,17 +20,18 @@ setup()
 
 loop()
   WiFiManager.loop()                    # 斷線重連
-  延遲 3s 初始化觸控 (touch.begin())
+  延遲 3s 初始化觸控 (touch.begin(&tft))
   每 60s: TDXClient → BusData → UI 更新
   每 10min: WxManager (HTTP) 更新氣象/AQI
   Slideshow 自動切換
+  夜間暫停檢查 (01:00-05:00)
 ```
 
 **資料流：**
 
 ```text
 WiFiManager ──IP──▶ (顯示)
-TDXClient.fetchBusETAByName("西新里(新新公園)")  # 一次抓回 22 支站牌
+TDXClient.fetchBusETAByName("西新里(新新公園)")  # 一次抓回所有同名牌站牌 ETA
       │  raw JSON
       ▼
 BusData.parseTDXResponse(all)
@@ -38,8 +39,8 @@ BusData.parseTDXResponse(all)
       ▼
 UIManager.drawScreen()  →  TFT_eSPI 上屏
 TouchManager.read()  →  事件 (TAP/HOLD/SWIPE) → 頁面切換/校準
-WxManager (HTTP)  →  氣象/AQI → UI 底部條
-Slideshow  →  相片輪播 + 跑馬燈
+WxManager (HTTP)  →  氣象/AQI → UI 天氣列
+Slideshow  →  相片輪播 (全螢幕)
 ```
 
 ---
@@ -98,17 +99,15 @@ bool isLowFloor;
 
 | 方法 | 說明 |
 | --- | --- |
-| `parseTDXResponse(json)` | 解析第一支站牌 JSON（清空現有） |
-| `mergeTDXResponse(json)` | 解析並合併第二支站牌（不清空） |
+| `parseTDXResponse(json)` | 解析 JSON（清空現有） |
 | `getCount(direction)` | 依方向回筆數（0=西, 1=東） |
 | `getBusAt(direction, index)` | 取該方向第 N 筆 |
 | `getTotalCount()` / `getLastUpdateTime()` | 總筆數 / 最近更新 |
 
-**解析邏輯**：`EstimateTime` 秒數為主排序依據（`-1`=暫無資料排最後），同路線同方向保留最近一班；東西向由 `Direction` 欄位（0=西，1=東）分組，不需再 merge 兩支 stopID。
+**解析邏輯**：`EstimateTime` 秒數為主排序依據（`-1`=暫無資料排最後），同路線同方向保留最近一班；東西向由 `Direction` 欄位（0=西，1=東）分組。
 
-> **TDX 站牌建模注意**：「西新里(新新公園)」在 TDX 中拆成 22 支同名牌 StopUID，
-> 每支站牌只回報各自那條路線的 ETA。查 `StopUID eq 'TPE12726'` 永遠只回 203，
-> 需用 `StopName contains '新新公園'` 一次抓回全量。對照表見 [TDX.md](TDX.md)。
+> **TDX 站牌建模注意**：「西新里(新新公園)」在 TDX 中拆成多支同名牌 StopUID，
+> 每支站牌只回報各自那條路線的 ETA。需用 `StopName contains '新新公園'` 一次抓回全量。
 
 ### 2.4 WxManager (`src/WxManager.h/cpp`)
 
@@ -127,22 +126,21 @@ bool isLowFloor;
 
 | 方法 | 說明 |
 | --- | --- |
-| `begin()` | XPT2046 Driver 初始化 (CS=33, IRQ=36) |
+| `begin(TFT_eSPI* tft)` | 初始化校準參數，`tft->setTouch()` |
 | `read()` | 回傳 `TouchEvent` (type, x, y, z) |
 
-**Library**：`median-dispersion/XPT2046 Driver@^1.0.2`（獨立於 TFT_eSPI）
+**Library**：TFT_eSPI 內建 XPT2046 支援（`-D TOUCH_CS=33`）
 
 **TouchEvent 類型**：`TOUCH_NONE` / `TOUCH_TAP` / `TOUCH_HOLD` / `TOUCH_SWIPE_UP/DOWN/LEFT/RIGHT`
 
-**校準模式**：長按 (i) 鈕 300ms+ 進入 4 點校準，使用 `XPT2046::Calibration` 結構體。
+**校準參數**：放在 `include/config_local.h`（5 值：x0, x1, y0, y1, flags=0）
 
 ### 2.6 UIManager (`src/UIManager.h/cpp`)
 
 | 頁面 | 說明 |
 | --- | --- |
-| `PAGE_DASHBOARD` | 天氣條 + 公車列表 (自動捲動) |
-| `PAGE_SLIDESHOW` | 相片全幅 + 跑馬燈疊加 |
-| `PAGE_SYSTEM` | 系統資訊 (全英文 ASCII) |
+| `PAGE_DASHBOARD` | 天氣列 + 公車列表 (東西向各自分頁，8秒自動翻頁) |
+| `PAGE_SLIDESHOW` | 相片全螢幕 |
 | `PAGE_CALIBRATION` | 觸控 4 點校準 |
 
 ### 2.7 main (`src/main.cpp`)
@@ -152,12 +150,12 @@ bool isLowFloor;
 | 開機 | 隔離觸控/SD CS → TFT_eSPI init → 顯示「連線中」 |
 | Wi-Fi | `WiFiManager` 輪詢重試，連上顯示 IP |
 | NTP | `time.nist.gov` / `time.stdtime.gov.tw`，GMT+8 固定 offset，開機 + 每 1h 重對 |
-| 觸控 | **延遲 3 秒** `touch.begin()` (避免開機不穩定) |
+| 觸控 | **延遲 3 秒** `touch.begin(&tft)` (避免開機不穩定) |
 | TDX | 每 60s 抓 ETA → `BusData` 解析 → `UIManager` 更新 |
-| WxManager | 每 10min 抓氣象/AQI (HTTP) → UI 底部條 |
-| Slideshow | 自動輪播 + 跑馬燈疊加 |
+| WxManager | 每 10min 抓氣象/AQI (HTTP) → UI 天氣列 |
+| Slideshow | 自動輪播 (全螢幕) |
 | LED | GPIO17 綠燈 PWM：連線中 0.5s 快閃 / 已連線 1s 慢閃 / 離線熄 |
-| 觸控事件 | 左右滑切頁、長按 (i) 校準、點擊相片暫停、點 (i) 進系統頁 |
+| 觸控事件 | 點擊/左滑切換頁面、長按天氣列校準 |
 
 ---
 
@@ -169,6 +167,8 @@ bool isLowFloor;
 | `TDX_CLIENT_ID` / `TDX_CLIENT_SECRET` | `config.h` | `config_local.h` | 不進 git |
 | `TARGET_STOP_NAME` | `config_local.h` | — | 站名「西新里(新新公園)」，`fetchBusETAByName` 用此參數 |
 | `REFRESH_INTERVAL_S` | `main.cpp` `static const int` | — | 60 秒；舊 `REFRESH_INTERVAL`（`config.h`）已停用 |
+| `ITEMS_PER_PAGE` | `UIManager.h` `static const int` | — | 4 筆/頁 |
+| `BUS_PAGE_MS` | `UIManager.h` `static const unsigned long` | — | 8000ms 翻頁間隔 |
 
 `config_local.h` 先 include（若存在），`config.h` 提供預設值。
 
@@ -177,7 +177,7 @@ bool isLowFloor;
 ## 4. Boot Loop 根因與解決總結
 
 | 現象 | 根因 | 解決方案 |
-|------|------|----------|
+| --- | --- | --- |
 | 開機白屏重開 | `touch.begin()` 在 `setup()` 過早執行 | **延遲 3 秒**在 `loop()` 中初始化 |
 | WiFi 後白屏 | `WiFiClientSecure` 區域變數在 `http.end()` 前析構 | **HTTPS client 宣告為類別成員變數** |
 | NTP 後崩潰 | `WiFiClientSecure` 在 WxManager HTTPS 請求中析構 | 改用 **HTTP** (open-meteo 支援) |
@@ -198,7 +198,7 @@ bool isLowFloor;
 | 堆疊/其他 | ~20 KB | |
 | **可用餘裕** | **~150 KB** | 安全邊際 |
 
-> 全鏈路 Flash 佔 34%（~1.39 MB / 4 MB app 區），`max_app_4MB.csv` partition。
+> 全鏈路 Flash 佔 34%（~1.38 MB / 4 MB app 區），`max_app_4MB.csv` partition。
 
 ---
 
@@ -210,7 +210,10 @@ bool isLowFloor;
 - [x] WxManager HTTP 取得氣象/AQI 正常
 - [x] TDX HTTPS `fetchBusETAByName` 回非空 JSON、`BusData` 解析
 - [x] 觸控初始化延遲 3s 正常、長按校準可進入
-- [x] UI 三頁切換、ETA 自動捲動、Slideshow 輪播
+- [x] UI 三頁切換、ETA 自動翻頁、Slideshow 輪播
+- [x] Splash 顯示 IP + NTP 時間（每 500ms 更新）
+- [x] 公車分頁：東/西向各自 8 秒翻頁，>4 筆才啟用
+- [x] 夜間暫停：01:00-05:00 不抓 TDX，顯示提示
 - [ ] 上機長時程穩定（斷線重連、60s 刷新循環、觸控長時程）
 
 ---
@@ -223,4 +226,7 @@ bool isLowFloor;
 - [Bodmer/TFT_eSPI](https://github.com/Bodmer/TFT_eSPI)
 - [ArduinoJson v6](https://arduinojson.org/v6/doc/)
 - [TDX API 文件](https://tdx.transportdata.tw/api-service)
-- [median-dispersion/XPT2046 Driver](https://github.com/median-dispersion/XPT2046-Driver)
+
+---
+
+*文件更新: 2026-10-23 (v1.0.0)*

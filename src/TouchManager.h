@@ -43,6 +43,7 @@ private:
     bool wasPressed = false;
     unsigned long pressStartTime = 0;
     int pressStartX = 0, pressStartY = 0;
+    int lastX = 0, lastY = 0;   // 最後一次按住的座標（放開時 getTouch 會回 0,0）
     static const int TAP_THRESHOLD_MS = 300;
     static const int MOVE_THRESHOLD = 20;
 

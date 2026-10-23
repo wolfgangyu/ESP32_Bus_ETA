@@ -34,13 +34,13 @@
 //  目標站牌設定
 // =============================================
 // 南港路三段新新公園站
-// 站牌 ID 需從 TDX API 查詢確認，常見為 "Nangang_SunSunPark" 或類似
+
 #define TARGET_STOP_NAME   "新新公園"
 #define TARGET_STOP_ID     ""  // 若知道具體站牌 ID 請填入，否則用名稱比對
 
 // 顯示設定
-#define MAX_BUS_DISPLAY    6      // 最多顯示幾筆公車資訊
-#define REFRESH_INTERVAL   30000  // 重新整理間隔 (毫秒) - 30 秒
+// 注意：REFRESH_INTERVAL 已移除，主循環使用 REFRESH_INTERVAL_S (60s)
+// MAX_BUS_DISPLAY 已移除，UIManager 使用 ITEMS_PER_PAGE (4)
 #define WIFI_RETRY_INTERVAL 10000 // WiFi 重連嘗試間隔
 
 // 觸控校準預設值 (XPT2046, 依板子實測調整)
@@ -60,9 +60,9 @@
 // =============================================
 //  韌體版本
 // =============================================
-// dev = 開發中；出 release 時改成 v0.1.0 等
+// dev = 開發中；出 release 時改成 vX.Y.Z 等
 #ifndef FW_VERSION
-#define FW_VERSION "v0.2.0"
+#define FW_VERSION "v1.0.0"
 #endif
 
 // =============================================

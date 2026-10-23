@@ -28,9 +28,8 @@ private:
     unsigned long lastAdvanceMs = 0;
     static const unsigned long ADVANCE_INTERVAL_MS = 10000UL;  // 10 seconds
 
-    // Decode buffer (reuse to avoid fragmentation)
-    static const size_t MAX_JPG_SIZE = 200 * 1024;  // 200 KB limit
-    uint8_t* jpgBuffer = nullptr;
+    // Decode 採串流解碼（TJpgDec.drawSdJpg），不需要大緩衝
+    // 舊版配置 200KB 連續記憶體，WiFi 起來後必失敗
 
     // Filters
     static const char* VALID_EXTENSIONS[];
@@ -59,9 +58,9 @@ public:
     int getPhotoCount() const { return photoCount; }
     const char* getCurrentFilename() const;
 
-    // Get current photo data for drawing
-    // Returns true if new photo loaded, false if using cached/placeholder
-    bool getCurrentPhoto(uint8_t*& outBuf, size_t& outLen, int& outW, int& outH);
+    // 直接把目前這張畫在 (x, y) 為左上角的 maxW×maxH 區域內（等比、置中）
+    // 串流解碼，不需先把整個 JPEG 讀進 RAM。回 false = 沒照片／解碼失敗
+    bool drawCurrent(int x, int y, int maxW, int maxH);
 
     // Debug
     void listPhotos();
