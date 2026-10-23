@@ -26,13 +26,13 @@ jobs:
 
       - name: Build firmware
         run: |
-          cd /Users/wolfgang/Projects/ESP32_Bus_ETA
-          ~/.platformio/penv/bin/pio run -e esp32dev
+          cd ${{ github.workspace }}
+          pio run -e esp32dev
 
       - name: Get firmware path
         id: firmware
         run: |
-          FIRMWARE=".pio/build/esp32dev/firmware.bin"
+          FIRMWARE="${{ github.workspace }}/.pio/build/esp32dev/firmware.bin"
           echo "path=$FIRMWARE" >> $GITHUB_OUTPUT
 
       - name: Create Release
