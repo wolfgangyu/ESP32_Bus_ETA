@@ -85,18 +85,25 @@ private:
     unsigned long lastClockCheckMs = 0;
     static const unsigned long CLOCK_CHECK_MS = 500UL;
 
-    // 公車分頁自動滾動 (5 秒切換 1 頁)
-    int busPageIndex = 0;
-    int totalBusPages = 0;
+    // 公車分頁自動滾動 (8 秒切換 1 頁，每方向獨立，>3筆才啟用)
+    int busPageIndexWest = 0;
+    int busPageIndexEast = 0;
+    int newTotalPagesWest = 1;
+    int newTotalPagesEast = 1;
     static const int ITEMS_PER_PAGE = 3;  // 每頁顯示筆數
-    unsigned long lastBusPageMs = 0;
-    static const unsigned long BUS_PAGE_MS = 5000UL;  // 5 秒切頁
+    unsigned long lastBusPageMsWest = 0;
+    unsigned long lastBusPageMsEast = 0;
+    static const unsigned long BUS_PAGE_MS = 8000UL;  // 8 秒切頁
     int totalRows = 0;
 
     // Splash 狀態
     bool showSplash = true;
     unsigned long splashStartMs = 0;
     static const unsigned long SPLASH_DURATION_MS = 3000UL; // 3秒顯示
+
+    // 夜間暫停 (01:00-05:00 不抓 TDX)
+    bool nightPause = false;
+    int  nightResumeHour = 5;
 
     // TJpg_Decoder 回呼
     static bool jpegCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* data);
@@ -134,6 +141,13 @@ public:
     void setShowSplash(bool show) { showSplash = show; splashStartMs = millis(); }
     bool isShowingSplash() const { return showSplash; }
     unsigned long getSplashStartMs() const { return splashStartMs; }
+
+    // 夜間暫停（01:00-05:00 不抓 TDX，畫面顯示提示）
+    void setNightPause(bool on, int resumeHour = 5) {
+        if (nightPause != on) { nightPause = on; busListDirty = true; }
+        nightResumeHour = resumeHour;
+    }
+    bool isNightPause() const { return nightPause; }
 
     // 局部更新
     void updateClock();
