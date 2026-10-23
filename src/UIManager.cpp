@@ -385,9 +385,8 @@ void UIManager::updateBusScroll() {
 // ── Slideshow ──
 void UIManager::drawSlideshow() {
     tft->fillScreen(BG);
-    drawWeatherBar();
-    // 相片區 - 全螢幕 (無跑馬燈)
-    tft->fillRect(0, m.photoTop, m.screenW, m.photoH, 0x0A1A2E);
+    // 相片區 - 全螢幕 (無天氣列、無跑馬燈)
+    tft->fillRect(0, 0, m.screenW, m.screenH, 0x0A1A2E);
     updateSlideshowPhoto();
 }
 
@@ -396,12 +395,13 @@ void UIManager::updateSlideshowPhoto() {
         if (slideshow && slideshow->getPhotoCount() > 0) {
             uint8_t* buf = nullptr; size_t len = 0; int w = 0, h = 0;
             if (slideshow->getCurrentPhoto(buf, len, w, h)) {
+                // 置中、縮放至全螢幕 (320x240)
                 int maxW = m.screenW - 4;
-                int maxH = m.photoH - 4;
+                int maxH = m.screenH - 4;
                 float s = min((float)maxW / w, (float)maxH / h);
                 int dw = (int)(w * s), dh = (int)(h * s);
                 int dx = (m.screenW - dw) / 2;
-                int dy = m.photoTop + (m.photoH - dh) / 2;
+                int dy = (m.screenH - dh) / 2;
                 TJpgDec.setJpgScale(1);
                 TJpgDec.setCallback(jpegCallback);
                 TJpgDec.drawJpg(dx, dy, buf, len);
@@ -415,7 +415,7 @@ void UIManager::updateSlideshowPhoto() {
 
 void UIManager::drawPhotoPlaceholder() {
     int cx = m.screenW / 2;
-    int cy = m.photoTop + m.photoH / 2;
+    int cy = m.screenH / 2;
     int w = 300, h = 180;
     tft->drawRect(cx - w/2, cy - h/2, w, h, C_BRDR);
     tft->setTextSize(1);

@@ -1,5 +1,10 @@
 /*
- * TouchManager.h - 觸控事件處理 (使用 TFT_eSPI 內建 XPT2046 支援)
+ * TouchManager.h - 觸控事件處理
+ *
+ * TFT_eSPI getTouch 回傳「已旋轉」的邏輯座標（0..width, 0..height）
+ * 校準 5 值順序：x0, x1, y0, y1, flags
+ *   flags: bit0=rotate(軸 swap), bit1=invert_x, bit2=invert_y
+ * 這塊 XPT2046 + setRotation(1)：AX 對 X、B 對 Y，不 swap，flags=0
  */
 
 #ifndef TOUCH_MANAGER_H
@@ -8,7 +13,6 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 
-// TouchEvent 定義在類別外部，方便使用
 enum TouchType {
     TOUCH_NONE = 0,
     TOUCH_TAP,
@@ -29,7 +33,11 @@ struct TouchEvent {
 
 class TouchManager {
 private:
+    TFT_eSPI* tft = nullptr;
     bool initialized = false;
+
+    // 觸控校準參數
+    int calX0 = 0, calY0 = 0, calX1 = 0, calY1 = 0;
 
     // 狀態追蹤
     bool wasPressed = false;
@@ -38,17 +46,19 @@ private:
     static const int TAP_THRESHOLD_MS = 300;
     static const int MOVE_THRESHOLD = 20;
 
+    TouchEvent processTouch(bool pressed, int x, int y, int z);
+
 public:
     TouchManager();
     ~TouchManager();
 
-    void begin();
+    void begin(TFT_eSPI* tftPtr = nullptr);
     TouchEvent read();
 
     // 校準相關
-    void setCalibration(int xMin, int xMax, int yMin, int yMax);
+    void setCalibration(int x0, int y0, int x1, int y1);
     void runCalibration();
-    bool isCalibrated() const { return initialized; }
+    bool isCalibrated() const { return calX0 != 0 || calY0 != 0 || calX1 != 0 || calY1 != 0; }
 };
 
 #endif

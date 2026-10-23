@@ -66,6 +66,12 @@ unsigned long touchInitTime = 0;
 // Splash 畫面狀態
 bool splashFinished = false;
 
+// 自動翻頁備用 (觸控失效時使用)
+unsigned long lastAutoPageMs = 0;
+static const unsigned long AUTO_PAGE_MS = 8000UL;  // 8秒自動翻頁
+bool autoPageEnabled = true;  // 觸控失效時啟用
+bool touchWorking = false;  // 觸控是否正常工作
+
 // NTP：設定時鐘並同步
 void syncTime() {
     configTime(NTP_GMT8_SEC, 0, NTP_SERVER1, NTP_SERVER2);
@@ -335,6 +341,35 @@ void loop() {
         lastWxMs = now;
         if (wx.fetchAll()) {
             ui.setWeatherDirty();
+        }
+    }
+
+    // Slideshow auto-advance
+    slideshow.tick(now);
+
+    // 自動翻頁備用 (觸控失效時啟用)
+    static bool touchWorking = false;
+    if (touchInitialized) {
+        TouchEvent ev = touch.read();
+        if (ev.type != TOUCH_NONE) {
+            touchWorking = true;
+            handleTouch(ev);
+        } else {
+            // 沒有觸控事件
+        }
+    }
+
+    // 自動翻頁備用：觸控初始化但未檢測到觸控事件時
+    if (autoPageEnabled && touchInitialized && !touchWorking) {
+        if (now - lastAutoPageMs >= AUTO_PAGE_MS) {
+            lastAutoPageMs = now;
+            if (currentPage == PAGE_DASHBOARD) {
+                pendingPage = PAGE_SLIDESHOW;
+                pageSwitchPending = true;
+            } else if (currentPage == PAGE_SLIDESHOW) {
+                pendingPage = PAGE_DASHBOARD;
+                pageSwitchPending = true;
+            }
         }
     }
 
