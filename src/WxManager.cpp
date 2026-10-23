@@ -57,19 +57,17 @@ int WxManager::wxIconType(int code) {
 bool WxManager::fetchAll() {
     lastFetchMs = millis();
 
-    // ── 1. 天氣預報（temperature + humidity + wind + WMO code）──
+    // ── 1. 天氣預報（改用 HTTP，避免 WiFiClientSecure 崩潰）──
     {
         HTTPClient http;
-        WiFiClientSecure client;
-        client.setInsecure();
-        String url = String("https://api.open-meteo.com/v1/forecast?latitude=")
+        String url = String("http://api.open-meteo.com/v1/forecast?latitude=")
                    + String(LAT, 4) + String("&longitude=")
                    + String(LON, 4) +
                    "&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m"
                    "&daily=temperature_2m_max,temperature_2m_min&forecast_days=1"
                    "&timezone=Asia%2FTaipei";
 
-        http.begin(client, url);
+        http.begin(url);
         http.setTimeout(15000);
         int code = http.GET();
         String raw = (code == 200) ? http.getString() : "";
@@ -98,7 +96,6 @@ bool WxManager::fetchAll() {
         windKmh = (int)cur["wind_speed_10m"].as<float>();
         wxCode  = (int)cur["weather_code"].as<int>();
 
-        // daily high/low：open-meteo 回傳 daily.temperature_2m_max = [32.3] 直接是 array of float
         JsonArray hiArr = doc["daily"]["temperature_2m_max"];
         JsonArray loArr = doc["daily"]["temperature_2m_min"];
         if (hiArr.size() > 0) tempHigh = (int)hiArr[0].as<float>();
@@ -109,17 +106,15 @@ bool WxManager::fetchAll() {
                       tempNow, humPct, windKmh, wxCode, tempHigh, tempLow);
     }
 
-    // ── 2. 空氣品質（US AQI + PM2.5/PM10）host 是 air-quality-api.open-meteo.com ──
+    // ── 2. 空氣品質（同樣改用 HTTP）──
     {
         HTTPClient http;
-        WiFiClientSecure client;
-        client.setInsecure();
-        String url = String("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=")
+        String url = String("http://air-quality-api.open-meteo.com/v1/air-quality?latitude=")
                    + String(LAT, 4) + String("&longitude=")
                    + String(LON, 4) +
                    "&current=us_aqi&timezone=Asia%2FTaipei";
 
-        http.begin(client, url);
+        http.begin(url);
         http.setTimeout(15000);
         int code = http.GET();
         String raw = (code == 200) ? http.getString() : "";

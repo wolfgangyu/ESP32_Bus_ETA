@@ -41,10 +41,9 @@ String TDXClient::getAccessToken() {
     #endif
 
     HTTPClient http;
-    WiFiClientSecure client;
-    client.setInsecure(); // 簡單處理，生產環境應驗證憑證
+    secureClient.setInsecure();
 
-    http.begin(client, "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token");
+    http.begin(secureClient, "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token");
     http.addHeader("Content-Type", "application/x-www-form-urlencoded");
     http.addHeader("Authorization", buildAuthHeader());
 
@@ -54,14 +53,13 @@ String TDXClient::getAccessToken() {
     if (httpCode == 200) {
         String response = http.getString();
         dataBytes += response.length();
-        // ArduinoJson 6.x: 用 DynamicJsonDocument（容量依 response 長度）
         DynamicJsonDocument doc(response.length() + 256);
         DeserializationError error = deserializeJson(doc, response);
 
         if (!error) {
             accessToken = doc["access_token"].as<String>();
             int expiresIn = doc["expires_in"].as<int>();
-            tokenExpiry = millis() + (expiresIn - 60) * 1000; // 提前 60 秒過期
+            tokenExpiry = millis() + (expiresIn - 60) * 1000;
 
             #ifdef DEBUG_SERIAL
             Serial.println("Access Token 取得成功");
@@ -92,11 +90,8 @@ String TDXClient::fetchBusETA(const String& stopName) {
     }
 
     HTTPClient http;
-    WiFiClientSecure client;
-    client.setInsecure();
+    secureClient.setInsecure();
 
-    // URL 編碼站牌名稱（v2 ETA 端點使用 StopUID，不支援站名模糊查詢；
-    // 此方法保留以相容舊版本，v2 回傳欄位見 BusData.cpp 註解）
     String encodedStopName = urlEncode(stopName);
     String url = "https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/Taipei?$format=JSON&$filter=contains(StopName/Zh_tw,'" + encodedStopName + "')&$top=50";
 
@@ -104,7 +99,7 @@ String TDXClient::fetchBusETA(const String& stopName) {
     Serial.printf("請求 URL: %s\n", url.c_str());
     #endif
 
-    http.begin(client, url);
+    http.begin(secureClient, url);
     http.addHeader("Authorization", "Bearer " + token);
     http.addHeader("Accept", "application/json");
 
@@ -119,7 +114,6 @@ String TDXClient::fetchBusETA(const String& stopName) {
         Serial.printf("API 回應長度: %d bytes\n", response.length());
         #endif
     } else if (httpCode == 401) {
-        // Token 過期，強制重新取得
         tokenExpiry = 0;
         #ifdef DEBUG_SERIAL
         Serial.println("Token 過期 (401)，下次將重新申請");
@@ -142,8 +136,7 @@ String TDXClient::fetchBusETAByName(const String& stopNameZh) {
     if (token.length() == 0) return "";
 
     HTTPClient http;
-    WiFiClientSecure client;
-    client.setInsecure();
+    secureClient.setInsecure();
 
     String url = "https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/Taipei"
                  "?%24format=JSON&%24filter=contains(StopName/Zh_tw,'" + urlEncode(stopNameZh) + "')&%24top=100";
@@ -152,7 +145,7 @@ String TDXClient::fetchBusETAByName(const String& stopNameZh) {
     Serial.printf("ETA URL: %s\n", url.c_str());
     #endif
 
-    http.begin(client, url);
+    http.begin(secureClient, url);
     http.addHeader("Authorization", "Bearer " + token);
     http.addHeader("Accept", "application/json");
 

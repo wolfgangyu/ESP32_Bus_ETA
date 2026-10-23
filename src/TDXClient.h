@@ -18,6 +18,9 @@ private:
     String accessToken;
     unsigned long tokenExpiry = 0;
 
+    // 成員變數 client，確保生命週期跨越 HTTP 請求
+    WiFiClientSecure secureClient;
+
     String getAccessToken();
     String buildAuthHeader();
     String urlEncode(const String& str);

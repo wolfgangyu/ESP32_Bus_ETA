@@ -1,0 +1,32 @@
+// 處理校準觸控
+void handleCalibrationTouch(TouchEvent ev) {
+    if (ev.type == TOUCH_TAP) {
+        if (calPointIdx < 4) {
+            // 在校準模式下，直接讀取原始 ADC 值
+            uint16_t rawX = 0, rawY = 0;
+            bool pressed = tft.getTouch(&rawX, &rawY, 0);  // pressure=0 不濾波
+
+            if (pressed) {
+                calRawX[calPointIdx] = rawX;
+                calRawY[calPointIdx] = rawY;
+                Serial.printf("[CAL] Point %d: rawX=%d rawY=%d\n",
+                              calPointIdx + 1, rawX, rawY);
+                calPointIdx++;
+                calNeedRedraw = true;
+            }
+        } else if (calPointIdx >= 4) {
+            // 全部 4 點完成，檢查是否按下 SAVE 或 CANCEL
+            // ev.x, ev.y 是原始 ADC 值 (0-4095)，需映射到螢幕座標 (320x240) 給 hit-test 用
+            int screenX = map(ev.x, 0, 4095, 0, 320);
+            int screenY = map(ev.y, 0, 4095, 0, 240);
+
+            if (ui.inCalibrateDone(screenX, screenY)) {
+                // 計算校準參數並存入
+                applyCalibration();
+                exitCalibrationMode(true);
+            } else if (ui.inCalibrateCancel(screenX, screenY)) {
+                exitCalibrationMode(false);
+            }
+        }
+    }
+}

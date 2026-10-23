@@ -1,7 +1,10 @@
 /*
- * UIManager.cpp - 頁面繪製（v1.0 spec 實作）
- * 全 ASCII：西向 WEST / 東向 EAST / 即將到 ARR / 分 min / 濕 RH
- * 中文字畫不出（Flash 容不下字表），只支援英文字。
+ * UIManager.cpp - 頁面繪製
+ *
+ * Splash: SD卡狀態 + Firmware版本 (3秒)
+ * Page 0: ETA (3筆/頁, 5秒自動捲動)
+ * Page 1: Slideshow 全螢幕 (無跑馬燈)
+ * 全 ASCII，中文字畫不出。
  */
 
 #include "UIManager.h"
@@ -21,6 +24,8 @@ void UIManager::begin(TFT_eSPI* t, BusData* b, WxManager* w,
     wifi = wf; tdx = td; sd = s; ldr = l;
     calcMetrics();
     s_active = this;
+    showSplash = true;
+    splashStartMs = millis();
 }
 
 void UIManager::calcMetrics() {
@@ -28,7 +33,7 @@ void UIManager::calcMetrics() {
     m.screenW = tft->width();   // 320
     m.screenH = tft->height();  // 240
     m.listBottom = m.screenH;
-    m.marqueeY = m.screenH - m.marqueeH;
+    m.photoH = m.screenH - m.photoTop;
     m.visibleRows = (m.listBottom - m.listTop - m.dirLabelH) / m.rowH;
 }
 
@@ -56,7 +61,7 @@ String UIManager::dateStr() const {
     return String(buf);
 }
 
-// ── 天氣圖標（drawCircle + drawLine，size≈22px）──
+// ── 天氣圖標 ──
 void UIManager::drawWxIcon(int x, int y, int size) {
     if (!wx || !wx->isValid()) return;
     int cx = x + size / 2, cy = y + size / 2;
@@ -73,7 +78,6 @@ void UIManager::drawWxIcon(int x, int y, int size) {
         case WxManager::ICON_CLOUD:
         case WxManager::ICON_OVR: {
             uint16_t c = (wx->getWxIconType()==WxManager::ICON_CLOUD) ? C_FG : C_DIM;
-            // 太陽在後（CLOUD 才有）
             if (wx->getWxIconType()==WxManager::ICON_CLOUD)
                 tft->fillCircle(cx - r/2, cy - r/2, r/2, C_SUN);
             tft->fillCircle(cx - r/3, cy, r, c);
@@ -109,14 +113,14 @@ void UIManager::drawWxIcon(int x, int y, int size) {
 }
 
 // ── 路線顯示：06S → 06sh、306Shuttle → 306sh ──
-// TDX 回傳的 routeName 可能是 "06S"（shuttle）或 "306Shuttle"；上屏統一簡寫
 void UIManager::routeDisp(const BusInfo* b, char* out, int outSize) {
     const char* src = b->routeName.c_str();
-    // 抓前導數字
     char num[8]; int n = 0;
-    while (src[n] && isdigit(src[n]) && n < 7) num[n++] = src[n];
+    while (src[n] && isdigit(src[n]) && n < 7) {
+        num[n] = src[n];
+        n++;
+    }
     num[n] = 0;
-    // 判斷 shuttle：數字後接 S/sh/Sh/Shuttle 都算
     char after[3] = { src[n], src[n+1], 0 };
     bool shuttle = (after[0] == 'S' || after[0] == 's') ||
                    (src[n] == 's' && src[n+1] == 'h') ||
@@ -125,15 +129,15 @@ void UIManager::routeDisp(const BusInfo* b, char* out, int outSize) {
     else         snprintf(out, outSize, "%s", num);
 }
 
-// ── 天氣條（含 (i) 鈕、右上時鐘日期）──
+// ── 天氣條（含時鐘日期）──
 void UIManager::drawWeatherBar() {
     tft->fillRect(0, 0, m.screenW, m.wxH, WX_BG);
     tft->drawLine(0, m.wxH - 1, m.screenW, m.wxH - 1, C_BRDR);
 
-    // 圖標（22x22，置左 8px）
+    // 圖標
     drawWxIcon(m.wxIconX, m.wxIconY, m.wxIconSize);
 
-    // 溫度（16px 放大一級）
+    // 溫度
     tft->setTextSize(1);
     tft->setTextColor(C_FG, WX_BG);
     tft->setCursor(m.wxTempX, m.wxH / 2 - 9);
@@ -145,7 +149,7 @@ void UIManager::drawWeatherBar() {
         tft->print(F("--"));
     }
 
-    // 狀態文字：上方短名（GLCD 8px 最小），下方 AQI/RH（GLCD 8px 最小，跟短名同小）
+    // 狀態文字
     int tx = 80;
     if (wx && wx->isValid()) {
         const char* shortName = "N/A";
@@ -158,11 +162,11 @@ void UIManager::drawWeatherBar() {
             case WxManager::ICON_FOG: shortName = "FOG"; break;
             case WxManager::ICON_SNOW: shortName = "SNOW"; break;
         }
-        tft->setTextSize(0);  // GLCD 8px 短名
+        tft->setTextSize(0);
         tft->setTextColor(C_FG, WX_BG);
         tft->setCursor(tx, 4);
         tft->print(shortName);
-        tft->setTextSize(0);  // GLCD 8px AQI/RH
+        tft->setTextSize(0);
         tft->setTextColor(C_DIM, WX_BG);
         tft->setCursor(tx, 14);
         tft->printf("AQI %d RH%d", wx->getAqi(), wx->getHum());
@@ -175,11 +179,8 @@ void UIManager::drawWeatherBar() {
         tft->print(F("H--/L--"));
     }
 
-    // 時鐘 + 日期（右側，(i) 鈕左方）
+    // 時鐘 + 日期
     drawHeaderClock();
-
-    // (i) 按鈕
-    drawInfoButton();
     weatherDirty = false;
 }
 
@@ -197,30 +198,58 @@ void UIManager::drawHeaderClock() {
     strncpy(lastDate, nd, sizeof(lastDate) - 1); lastDate[15] = 0;
     clockNeedsRedraw = false;
 
-    // 時鐘 26px（上，放大一級）、日期 GLCD 8px（下），(i) 鈕左邊
-    // 固定左對齊 wxClockX；擦除寬固定，字寬估算不準時也不亂
-    tft->fillRect(m.wxClockX - 4, 0, m.infoBtnX - m.wxClockX + 8, m.wxH - 1, WX_BG);
-    tft->setTextSize(2);  // FONT4 26px 時鐘
+    tft->fillRect(m.wxClockX - 4, 0, m.screenW - m.wxClockX + 4, m.wxH - 1, WX_BG);
+    tft->setTextSize(2);
     tft->setTextColor(C_FG, WX_BG);
     tft->setCursor(m.wxClockX, 0);
     tft->print(lastClock);
-    tft->setTextSize(0);  // GLCD 8px 日期（含星期，完整 "SUN 10/18"）
+    tft->setTextSize(0);
     tft->setTextColor(C_DIM, WX_BG);
     tft->setCursor(m.wxClockX, 26);
     tft->print(lastDate);
 }
 
-void UIManager::drawInfoButton() {
-    int cx = m.infoBtnX + m.infoBtnSize / 2;
-    int cy = m.infoBtnY + m.infoBtnSize / 2;
-    tft->drawCircle(cx, cy, m.infoBtnSize / 2, C_DIM);
+// ── Splash 畫面 ──
+void UIManager::drawSplashScreen() {
+    tft->fillScreen(BG);
+
+    // 標題
+    tft->setTextSize(2);
+    tft->setTextColor(C_FG, BG);
+    tft->setCursor(20, 30);
+    tft->println(F("ESP32 Bus ETA"));
+
     tft->setTextSize(1);
-    tft->setTextColor(C_FG, WX_BG);
-    tft->setCursor(cx - 2, cy - 4);
-    tft->print('i');
+    tft->setTextColor(C_DIM, BG);
+    tft->setCursor(20, 60);
+    tft->println(F("HW-950  ILI9341"));
+
+    // SD 卡狀態
+    tft->setCursor(20, 100);
+    tft->print(F("SD Card: "));
+    if (sd && sd->isMounted()) {
+        tft->setTextColor(C_SD_OK, BG);
+        tft->printf("OK  %.1f GB", sd->getTotalGB());
+    } else {
+        tft->setTextColor(C_SD_NO, BG);
+        tft->print(F("NOT FOUND"));
+    }
+
+    // Firmware 版本
+    tft->setCursor(20, 130);
+    tft->setTextColor(C_DIM, BG);
+    tft->printf("FW: %s", FW_VERSION);
+    tft->setCursor(20, 150);
+    tft->printf("Build: %s", __DATE__);
+
+    // 底部提示
+    tft->setTextSize(0);
+    tft->setTextColor(C_DIM, BG);
+    tft->setCursor(20, 210);
+    tft->print(F("Loading..."));
 }
 
-// ── 公車滿幅 ──
+// ── 公車列表 (3筆/頁) ──
 void UIManager::drawBusList() {
     tft->fillRect(0, m.listTop, m.screenW, m.listBottom - m.listTop, BG);
 
@@ -230,59 +259,65 @@ void UIManager::drawBusList() {
     int half = m.screenW / 2;
     int y = m.listTop + 4;
 
-    // 方向標籤：WEST/EAST（GLCD 8px 小字）+ 右側「N 班」（16px dim，收後不蓋字）
-    int westN = busData ? busData->getCount(0) : 0;
-    int eastN = busData ? busData->getCount(1) : 0;
-    tft->setTextSize(0);  // GLCD 8px 標籤
+    // 方向標籤
+    int totalWest = busData ? busData->getCount(0) : 0;
+    int totalEast = busData ? busData->getCount(1) : 0;
+    totalRows = totalWest + totalEast;
+
+    tft->setTextSize(0);
     tft->setTextColor(C_WEST, BG);
     tft->setCursor(8, y + 6);
     tft->print(F("WEST"));
     tft->setTextColor(C_EAST, BG);
     tft->setCursor(half + 8, y + 6);
     tft->print(F("EAST"));
-    // 班數（GLCD 8px，跟「306sh」同寬度坐標 + 同 y，留 6px 空隙不壓到）
+
+    // 班數
     tft->setTextColor(C_DIM, BG);
     char nbuf[4];
-    snprintf(nbuf, sizeof(nbuf), "%d", westN);
+    snprintf(nbuf, sizeof(nbuf), "%d", totalWest);
     tft->setCursor(half - 8 - 6 - 6, y + 6);
     tft->print(nbuf);
-    snprintf(nbuf, sizeof(nbuf), "%d", eastN);
+    snprintf(nbuf, sizeof(nbuf), "%d", totalEast);
     tft->setCursor(m.screenW - 8 - 6 - 6, y + 6);
     tft->print(nbuf);
 
-    y += m.dirLabelH;
-    int totalWest = busData ? busData->getCount(0) : 0;
-    int totalEast = busData ? busData->getCount(1) : 0;
-    totalRows = totalWest + totalEast;
-
-    // 計算單列可見數量
-    int visible = m.visibleRows;
-
-    // 西向列（左半，獨立捲動）
-    int wMaxScroll = max(0, totalWest - visible);
-    int wStart = (wMaxScroll > 0) ? (busScrollOffset % (wMaxScroll + 1)) : 0;
-    int wShown = 0;
-    for (int i = 0; i < totalWest && wShown < visible; i++) {
-        int idx = (wStart + i) % totalWest;
-        const BusInfo* b = busData->getBusAt(0, idx);
-        if (!b) break;
-        int rowY = y + wShown * m.rowH;
-        if (rowY + m.rowH > m.listBottom) break;
-        drawBusRow(b, rowY, 0);
-        wShown++;
+    // 頁碼
+    if (totalBusPages > 1) {
+        tft->setTextSize(0);
+        tft->setTextColor(C_DIM, BG);
+        tft->setCursor(m.screenW - 50, m.listTop + 6);
+        tft->printf("%d/%d", busPageIndex + 1, totalBusPages);
     }
-    // 東向列（右半，獨立捲動，用同一個 busScrollOffset 節奏）
-    int eMaxScroll = max(0, totalEast - visible);
-    int eStart = (eMaxScroll > 0) ? (busScrollOffset % (eMaxScroll + 1)) : 0;
-    int eShown = 0;
-    for (int i = 0; i < totalEast && eShown < visible; i++) {
-        int idx = (eStart + i) % totalEast;
-        const BusInfo* b = busData->getBusAt(1, idx);
+
+    y += m.dirLabelH;
+
+    // 計算總頁數
+    int totalItems = totalWest + totalEast;
+    totalBusPages = (totalItems + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
+    if (totalBusPages == 0) totalBusPages = 1;
+
+    // 修正頁碼
+    if (busPageIndex >= totalBusPages) busPageIndex = 0;
+
+    // 計算這一頁的起始與結束索引
+    int startIdx = busPageIndex * ITEMS_PER_PAGE;
+    int endIdx = min(startIdx + ITEMS_PER_PAGE, totalItems);
+
+    int shown = 0;
+    for (int idx = startIdx; idx < endIdx && shown < ITEMS_PER_PAGE; idx++) {
+        int dir = 0;
+        int localIdx = idx;
+        if (localIdx >= totalWest) {
+            dir = 1;
+            localIdx -= totalWest;
+        }
+        const BusInfo* b = busData->getBusAt(dir, localIdx);
         if (!b) break;
-        int rowY = y + eShown * m.rowH;
+        int rowY = y + shown * m.rowH;
         if (rowY + m.rowH > m.listBottom) break;
-        drawBusRow(b, rowY, 1);
-        eShown++;
+        drawBusRow(b, rowY, dir);
+        shown++;
     }
 
     if (totalRows == 0) {
@@ -297,9 +332,8 @@ void UIManager::drawBusList() {
 void UIManager::drawBusRow(const BusInfo* b, int y, int dir) {
     uint16_t c = (dir == 0) ? C_WEST : C_EAST;
     int x0 = (dir == 0) ? 8 : 8 + m.screenW/2;
-    int colW = m.screenW / 2;  // 160
 
-    // 路線名（FONT4 26px，06S → 06sh），靠左
+    // 路線名
     char rn[8];
     routeDisp(b, rn, sizeof(rn));
     tft->setTextSize(2);
@@ -307,62 +341,44 @@ void UIManager::drawBusRow(const BusInfo* b, int y, int dir) {
     tft->setCursor(x0, y + 6);
     tft->print(rn);
 
-    // ETA 分鐘（大字 26px，跟路線名拉開；用亮色避免被背景吃掉）
+    // ETA 分鐘
     int mins = b->estimateSecs / 60;
     if (mins < 1 && b->estimateSecs > 0) mins = 1;
     uint16_t etaC = (mins <= 5 && b->estimateSecs > 0) ? C_WARN : C_FG;
     tft->setTextSize(2);
     tft->setTextColor(etaC, BG);
-    int etaX = x0 + 70;  // 跟路線名留足 24px 空隙
+    int etaX = x0 + 70;
     tft->setCursor(etaX, y + 6);
     tft->print(String(mins));
-    // min 小字（GLCD 8px）放分鐘數字正下方，y+6+18=24（行高 44px，距下邊 20px 不壓到下一列）
     tft->setTextSize(0);
     tft->setTextColor(C_DIM, BG);
     tft->setCursor(etaX, y + 24);
     tft->print(F("min"));
 }
 
-// ── 自動捲動：東西向各各獨立，10s 捲 1 列，停 5s ──
+// ── 公車分頁自動切換：5 秒切 1 頁 ──
 void UIManager::updateBusScroll() {
     int totalWest = busData ? busData->getCount(0) : 0;
     int totalEast = busData ? busData->getCount(1) : 0;
-    int maxScroll = max(totalWest, totalEast) - m.visibleRows;
-    if (maxScroll <= 0) {
-        busScrollOffset = 0;
-        scrollAtTop = scrollAtBottom = false;
-        totalRows = totalWest + totalEast;
+    int totalItems = totalWest + totalEast;
+
+    int newTotalPages = (totalItems + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
+    if (newTotalPages == 0) newTotalPages = 1;
+    totalBusPages = newTotalPages;
+
+    if (totalBusPages <= 1) {
+        busPageIndex = 0;
+        totalRows = totalItems;
         return;
     }
-    totalRows = totalWest + totalEast;
+    totalRows = totalItems;
 
     unsigned long now = millis();
-    if (now - lastBusScrollMs < BUS_SCROLL_MS) return;
+    if (now - lastBusPageMs < BUS_PAGE_MS) return;
 
-    if (scrollAtTop) {
-        if (now - lastBusScrollMs >= BUS_PAUSE_MS) {
-            scrollAtTop = false;
-            busScrollOffset = 1;
-            lastBusScrollMs = now;
-            busListDirty = true;
-        }
-        return;
-    }
-    if (scrollAtBottom) {
-        if (now - lastBusScrollMs >= BUS_PAUSE_MS) {
-            scrollAtBottom = false;
-            busScrollOffset = 0;  // 回到頂端循環
-            lastBusScrollMs = now;
-            busListDirty = true;
-        }
-        return;
-    }
-    busScrollOffset++;
-    if (busScrollOffset >= maxScroll) {
-        busScrollOffset = maxScroll;
-        scrollAtBottom = true;
-    }
-    lastBusScrollMs = now;
+    // 切換到下一頁
+    busPageIndex = (busPageIndex + 1) % totalBusPages;
+    lastBusPageMs = now;
     busListDirty = true;
 }
 
@@ -370,32 +386,31 @@ void UIManager::updateBusScroll() {
 void UIManager::drawSlideshow() {
     tft->fillScreen(BG);
     drawWeatherBar();
-    // 相片區
+    // 相片區 - 全螢幕 (無跑馬燈)
     tft->fillRect(0, m.photoTop, m.screenW, m.photoH, 0x0A1A2E);
     updateSlideshowPhoto();
-    // 跑馬燈（半透明深色底 + 公車文字）
-    drawMarquee();
 }
 
 void UIManager::updateSlideshowPhoto() {
-    if (slideshow && slideshow->getPhotoCount() > 0) {
-        uint8_t* buf = nullptr; size_t len = 0; int w = 0, h = 0;
-        if (slideshow->getCurrentPhoto(buf, len, w, h)) {
-            // 置中、縮放至 maxW=320 maxH=170（留 30px 給跑馬燈下緣）
-            int maxW = m.screenW - 4;
-            int maxH = m.photoH - 4;
-            float s = min((float)maxW / w, (float)maxH / h);
-            int dw = (int)(w * s), dh = (int)(h * s);
-            int dx = (m.screenW - dw) / 2;
-            int dy = m.photoTop + (m.photoH - dh) / 2;
-            TJpgDec.setJpgScale(1);
-            TJpgDec.setCallback(jpegCallback);
-            TJpgDec.drawJpg(dx, dy, buf, len);
+    if (photoDirty) {
+        if (slideshow && slideshow->getPhotoCount() > 0) {
+            uint8_t* buf = nullptr; size_t len = 0; int w = 0, h = 0;
+            if (slideshow->getCurrentPhoto(buf, len, w, h)) {
+                int maxW = m.screenW - 4;
+                int maxH = m.photoH - 4;
+                float s = min((float)maxW / w, (float)maxH / h);
+                int dw = (int)(w * s), dh = (int)(h * s);
+                int dx = (m.screenW - dw) / 2;
+                int dy = m.photoTop + (m.photoH - dh) / 2;
+                TJpgDec.setJpgScale(1);
+                TJpgDec.setCallback(jpegCallback);
+                TJpgDec.drawJpg(dx, dy, buf, len);
+            }
+        } else {
+            drawPhotoPlaceholder();
         }
-    } else {
-        drawPhotoPlaceholder();
+        photoDirty = false;
     }
-    photoDirty = false;
 }
 
 void UIManager::drawPhotoPlaceholder() {
@@ -411,166 +426,32 @@ void UIManager::drawPhotoPlaceholder() {
     tft->print(F("Put JPG on SD"));
 }
 
-void UIManager::drawMarquee() {
-    int y = m.marqueeY;
-    // 55% 深色底（無 GPU blur）
-    tft->fillRect(0, y, m.screenW, m.marqueeH, 0x010B);
-    tft->drawLine(0, y, m.screenW, y, C_BRDR);
-
-    // 收集公車文字
-    String w, e;
-    if (busData) {
-        int wn = busData->getCount(0);
-        for (int i = 0; i < wn && i < 4; i++) {
-            const BusInfo* b = busData->getBusAt(0, i);
-            if (b) {
-                w += b->routeName;
-                w += " ";
-                w += String(b->estimateSecs / 60);
-                w += "min ";
-            }
-        }
-        int en = busData->getCount(1);
-        for (int i = 0; i < en && i < 4; i++) {
-            const BusInfo* b = busData->getBusAt(1, i);
-            if (b) {
-                e += b->routeName;
-                e += " ";
-                e += String(b->estimateSecs / 60);
-                e += "min ";
-            }
-        }
-    }
-    tft->setTextSize(1);
-    tft->setTextColor(C_WEST, BG);
-    tft->setCursor(6, y + 8);
-    tft->print(F("W ")); tft->print(w.length() ? w : F("-"));
-    tft->setTextColor(C_EAST, BG);
-    tft->setCursor(6, y + 20);
-    tft->print(F("E ")); tft->print(e.length() ? e : F("-"));
-    marqueeDirty = false;
-}
-
-// ── 系統頁 ──
-void UIManager::drawSystemPage() {
-    tft->fillScreen(BG);
-    tft->setTextSize(2);
-    tft->setTextColor(C_FG, BG);
-    tft->setCursor(10, 8);
-    tft->print(F("SYSTEM"));
-
-    // 右上 × 鈕
-    int cx = m.screenW - 16, cy = 16;
-    tft->drawCircle(cx, cy, 10, C_DIM);
-    tft->drawLine(cx - 5, cy - 5, cx + 5, cy + 5, C_DIM);
-    tft->drawLine(cx + 5, cy - 5, cx - 5, cy + 5, C_DIM);
-
-    struct Row { const char* k; char v[24]; bool ok; };
-    Row rows[12];
-    int n = 0;
-
-    rows[n].k = "WiFi";
-    if (wifi && wifi->isConnected()) {
-        String tmp = "ON " + wifi->getIP();
-        tmp.toCharArray(rows[n].v, sizeof(rows[n].v));
-        rows[n].ok = true;
-    } else {
-        strcpy(rows[n].v, "OFF");
-        rows[n].ok = false;
-    }
-    n++;
-
-    rows[n].k = "WiFi MAC";
-    {
-        String macStr = WiFi.macAddress();  // "04:B2:47:84:6B:A0" 格式
-        strncpy(rows[n].v, macStr.c_str(), sizeof(rows[n].v) - 1);
-        rows[n].v[sizeof(rows[n].v) - 1] = 0;
-        rows[n].ok = macStr.length() > 0;
-    }
-    n++;
-
-    rows[n].k = "TDX Calls";
-    snprintf(rows[n].v, sizeof(rows[n].v), "%d today", tdx ? tdx->getCallCount() : 0);
-    rows[n].ok = false;
-    n++;
-
-    rows[n].k = "Data Used";
-    snprintf(rows[n].v, sizeof(rows[n].v), "%.1f KB", tdx ? tdx->getDataUsedKB() : 0.0f);
-    rows[n].ok = false;
-    n++;
-
-    rows[n].k = "SD Card";
-    if (sd && sd->isMounted()) {
-        snprintf(rows[n].v, sizeof(rows[n].v), "OK %.1f GB", sd->getTotalGB());
-        rows[n].ok = true;
-    } else {
-        strcpy(rows[n].v, "NO CARD");
-        rows[n].ok = false;
-    }
-    n++;
-
-    rows[n].k = "Photos";
-    snprintf(rows[n].v, sizeof(rows[n].v), "%d / 50", sd ? sd->countPhotos() : 0);
-    rows[n].ok = false;
-    n++;
-
-    rows[n].k = "Backlight";
-    snprintf(rows[n].v, sizeof(rows[n].v), "AUTO %d%%", ldr ? (int)ldr->getDuty() * 100 / 255 : 0);
-    rows[n].ok = false;
-    n++;
-
-    rows[n].k = "Firmware";
-    snprintf(rows[n].v, sizeof(rows[n].v), "%s %s", FW_VERSION, __DATE__);
-    rows[n].ok = false;
-    n++;
-
-    rows[n].k = "TDX Stop";
-    snprintf(rows[n].v, sizeof(rows[n].v), "%s", TARGET_STOP_NAME);
-    rows[n].ok = false;
-    n++;
-
-    int y = 40;
-    for (int i = 0; i < n && y < m.screenH - 8; i++) {
-        tft->setTextSize(1);
-        tft->setTextColor(C_DIM, BG);
-        tft->setCursor(10, y);
-        tft->print(rows[i].k);
-        tft->setTextColor(rows[i].ok ? C_WEST : C_FG, BG);
-        int vlen = strlen(rows[i].v) * 6;
-        tft->setCursor(m.screenW - 10 - vlen, y);
-        tft->print(rows[i].v);
-        y += 16;
-        if (i < n - 1) tft->drawLine(0, y + 4, m.screenW, y + 4, 0x141D30);
-        y += 8;
-    }
-    fullRedrawNeeded = false;
-}
-
-// ── 主入口 ──
 void UIManager::drawPage(Page p) {
     switch (p) {
         case PAGE_DASHBOARD:
-            tft->fillScreen(BG);
-            drawWeatherBar();
-            drawBusList();
-            clockNeedsRedraw = true;
-            lastBusScrollMs = millis();
-            scrollAtTop = true;
-            busScrollOffset = 0;
+            if (showSplash) {
+                drawSplashScreen();
+            } else {
+                tft->fillScreen(BG);
+                drawWeatherBar();
+                drawBusList();
+                clockNeedsRedraw = true;
+                lastBusPageMs = millis();
+                busPageIndex = 0;
+                busListDirty = true;
+            }
             fullRedrawNeeded = false;
             break;
         case PAGE_SLIDESHOW:
             drawSlideshow();
             fullRedrawNeeded = false;
             break;
-        case PAGE_SYSTEM:
-            drawSystemPage();
+        case PAGE_CALIBRATION:
             fullRedrawNeeded = false;
             break;
     }
 }
 
-// ── 局部時鐘更新（只改天氣條右側）──
 void UIManager::updateClock() {
     unsigned long now = millis();
     if (now - lastClockCheckMs < CLOCK_CHECK_MS) return;
@@ -579,28 +460,115 @@ void UIManager::updateClock() {
 }
 
 void UIManager::updateBusList() {
-    updateBusScroll();
+    updateBusScroll();  // 每輪都要檢查捲動計時
     if (busListDirty) drawBusList();
 }
 
-void UIManager::updateMarquee() {
-    if (marqueeDirty) drawMarquee();
+// ── 觸控 hit-test ──
+bool UIManager::inCalibratePoint(int x, int y, int idx) const {
+    const int size = 30;
+    int px[4], py[4];
+    int margin = 20;
+    px[0] = margin; py[0] = margin;
+    px[1] = m.screenW - margin; py[1] = margin;
+    px[2] = margin; py[2] = m.screenH - margin;
+    px[3] = m.screenW - margin; py[3] = m.screenH - margin;
+    if (idx < 0 || idx > 3) return false;
+    return x >= px[idx] - size/2 && x <= px[idx] + size/2 &&
+           y >= py[idx] - size/2 && y <= py[idx] + size/2;
 }
 
-// ── 觸控 hit-test ──
-bool UIManager::inInfoBtn(int x, int y) const {
-    return x >= m.infoBtnX && x <= m.infoBtnX + m.infoBtnSize &&
-           y >= m.infoBtnY && y <= m.infoBtnY + m.infoBtnSize;
+bool UIManager::inCalibrateDone(int x, int y) const {
+    int btnW = 80, btnH = 35;
+    int bx = m.screenW - btnW - 10;
+    int by = m.screenH - btnH - 10;
+    return x >= bx && x <= bx + btnW && y >= by && y <= by + btnH;
 }
-bool UIManager::inSystemClose(int x, int y) const {
-    int cx = m.screenW - 16, cy = 16;
-    return (x-cx)*(x-cx) + (y-cy)*(y-cy) <= 100;
+
+bool UIManager::inCalibrateCancel(int x, int y) const {
+    int btnW = 80, btnH = 35;
+    int bx = 10;
+    int by = m.screenH - btnH - 10;
+    return x >= bx && x <= bx + btnW && y >= by && y <= by + btnH;
 }
-bool UIManager::inPhoto(int x, int y) const {
-    return y >= m.photoTop && y < m.marqueeY;
-}
-bool UIManager::inBusRow(int x, int y, int& idx) const {
-    if (y < m.listTop + m.dirLabelH || y >= m.listBottom) return false;
-    idx = (y - m.listTop - m.dirLabelH) / m.rowH + busScrollOffset;
-    return idx >= 0 && idx < totalRows;
+
+// ── 校準頁面繪製 ──
+void UIManager::drawCalibrationPage(int currentPoint, int16_t* calX, int16_t* calY) {
+    tft->fillScreen(BG);
+
+    // 標題
+    tft->setTextSize(2);
+    tft->setTextColor(C_FG, BG);
+    tft->setCursor(10, 10);
+    tft->print(F("TOUCH CALIBRATION"));
+
+    // 說明
+    tft->setTextSize(1);
+    tft->setTextColor(C_DIM, BG);
+    tft->setCursor(10, 40);
+    tft->printf("Press point %d/4", currentPoint + 1);
+
+    // 4 個校準點位置
+    const int size = 30;
+    int px[4], py[4];
+    int margin = 20;
+    px[0] = margin; py[0] = margin;
+    px[1] = m.screenW - margin; py[1] = margin;
+    px[2] = margin; py[2] = m.screenH - margin;
+    px[3] = m.screenW - margin; py[3] = m.screenH - margin;
+
+    // 畫出所有點
+    for (int i = 0; i < 4; i++) {
+        uint16_t color;
+        if (i < currentPoint) color = C_WEST;
+        else if (i == currentPoint) color = C_WARN;
+        else color = C_DIM;
+
+        tft->drawCircle(px[i], py[i], size/2, color);
+        tft->drawCircle(px[i], py[i], size/2 - 4, color);
+        tft->drawLine(px[i] - size/4, py[i], px[i] + size/4, py[i], color);
+        tft->drawLine(px[i], py[i] - size/4, px[i], py[i] + size/4, color);
+
+        tft->setTextSize(1);
+        tft->setTextColor(color, BG);
+        char label[4];
+        snprintf(label, sizeof(label), "%d", i + 1);
+        int tx = px[i] - 3;
+        int ty = py[i] + size/2 + 6;
+        tft->setCursor(tx, ty);
+        tft->print(label);
+    }
+
+    // 如果已完成全部 4 點，顯示校準值並等待確認
+    if (currentPoint >= 4) {
+        tft->setTextSize(1);
+        tft->setTextColor(C_FG, BG);
+        tft->setCursor(10, 70);
+        tft->print(F("Calibration complete:"));
+        tft->setCursor(10, 88);
+        tft->printf("X0=%d Y0=%d", calX[0], calY[0]);
+        tft->setCursor(10, 104);
+        tft->printf("X1=%d Y1=%d", calX[1], calY[1]);
+        tft->setCursor(10, 120);
+        tft->printf("X2=%d Y2=%d", calX[2], calY[2]);
+        tft->setCursor(10, 136);
+        tft->printf("X3=%d Y3=%d", calX[3], calY[3]);
+
+        // Done 按鈕
+        int btnW = 80, btnH = 35;
+        int bx = m.screenW - btnW - 10;
+        int by = m.screenH - btnH - 10;
+        tft->fillRoundRect(bx, by, btnW, btnH, 6, C_WEST);
+        tft->setTextSize(1);
+        tft->setTextColor(BG, C_WEST);
+        tft->setCursor(bx + 18, by + 10);
+        tft->print(F("SAVE"));
+
+        // Cancel 按鈕
+        bx = 10;
+        tft->fillRoundRect(bx, by, btnW, btnH, 6, C_EAST);
+        tft->setTextColor(BG, C_EAST);
+        tft->setCursor(bx + 12, by + 10);
+        tft->print(F("CANCEL"));
+    }
 }

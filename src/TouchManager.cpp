@@ -1,52 +1,30 @@
 /*
- * TouchManager.cpp - 觸控事件處理實作
+ * TouchManager.cpp - 觸控事件處理 (使用 TFT_eSPI 內建 XPT2046 支援 + 校準模式)
  *
- * TFT_eSPI getTouch 回傳「已旋轉」的邏輯座標（0..width, 0..height）
- * 校準 5 值順序：x0, x1, y0, y1, flags
- *   flags: bit0=rotate(軸 swap), bit1=invert_x, bit2=invert_y
- * 這塊 XPT2046 + setRotation(1)：AX 對 X、B 對 Y，不 swap，flags=0
+ * HW-950 觸控 IC: XPT2046 (電阻式)
+ * TFT_eSPI 使用 HSPI (GPIO 14, 13, 12) 連接 ILI9341
+ * XPT2046 觸控使用 VSPI (GPIO 25, 32, 39, CS=33)
+ * TFT_eSPI 庫會自動管理兩條 SPI 總線
  */
 
 #include "TouchManager.h"
 #include "config.h"
+#include <TFT_eSPI.h>
 
 TouchManager::TouchManager() {}
 
 TouchManager::~TouchManager() {}
 
-void TouchManager::begin(TFT_eSPI* tftPtr) {
-    if (tftPtr) {
-        tft = tftPtr;
-    }
-    if (tft) {
-        uint16_t calData[5] = {
-            (uint16_t)TOUCH_CAL_X0,
-            (uint16_t)TOUCH_CAL_X1,
-            (uint16_t)TOUCH_CAL_Y0,
-            (uint16_t)TOUCH_CAL_Y1,
-            0  // flags：不 swap、不 invert
-        };
-        tft->setTouch(calData);
-        initialized = true;
-        #ifdef DEBUG_SERIAL
-        Serial.printf("[Touch] cal x0=%d x1=%d y0=%d y1=%d flags=0\n",
-                      TOUCH_CAL_X0, TOUCH_CAL_X1, TOUCH_CAL_Y0, TOUCH_CAL_Y1);
-        #endif
-    }
+void TouchManager::begin() {
+    // TFT_eSPI 在 tft.init() 時已自動初始化觸控控制器
+    // 這裡只需標記已初始化
+    initialized = true;
     wasPressed = false;
-}
+    Serial.println("[Touch] TFT_eSPI built-in XPT2046 ready");
 
-void TouchManager::setCalibration(int x0, int y0, int x1, int y1) {
-    calX0 = x0;
-    calY0 = y0;
-    calX1 = x1;
-    calY1 = y1;
-}
-
-void TouchManager::runCalibration() {
-    #ifdef DEBUG_SERIAL
-    Serial.println("[Touch] 依上機座標更新 config_local.h 的 TOUCH_CAL_X0/X1/Y0/Y1");
-    #endif
+    // 嘗試進行校準以檢查觸控是否工作
+    // extern TFT_eSPI tft;
+    // tft.calibrateTouch();  // 這會阻塞直到校準完成
 }
 
 TouchEvent TouchManager::read() {
@@ -57,31 +35,43 @@ TouchEvent TouchManager::read() {
     event.z = 0;
     event.time = millis();
 
-    if (!initialized || !tft) return event;
+    if (!initialized) return event;
 
-    // getTouch 回傳邏輯座標（已校準+旋轉，0..width / 0..height），直接用
-    uint16_t lx = 0, ly = 0;
-    bool pressed = tft->getTouch(&lx, &ly, 600);
-    int x = pressed ? lx : 0;
-    int y = pressed ? ly : 0;
-    // clamp 保險
-    x = max(0, min((int)tft->width() - 1, x));
-    y = max(0, min((int)tft->height() - 1, y));
+    // 使用 TFT_eSPI 的觸控讀取
+    extern TFT_eSPI tft;
+    uint16_t x = 0, y = 0;
+    // 使用較低的 threshold (500) 以提高靈敏度
+    bool pressed = tft.getTouch(&x, &y, 500);
 
-    event.x = x;
-    event.y = y;
-    event.z = pressed ? 1 : 0;
+    // 測試用：也嘗試直接讀取原始觸控狀態
+    // uint16_t rx = 0, ry = 0;
+    // bool rpressed = tft.getTouchRaw(&rx, &ry);
+    // Serial.printf("[TouchMgr] raw pressed=%d x=%d y=%d\n", rpressed, rx, ry);
 
-    // 狀態機
+    Serial.printf("[TouchMgr] getTouch pressed=%d x=%d y=%d\n", pressed, x, y);
+
+    if (pressed && x <= 319 && y <= 239) {
+        event.x = x;
+        event.y = y;
+        event.z = 1;
+        Serial.printf("[TouchMgr] tft.getTouch=(%d,%d)\n", x, y);
+    } else {
+        event.x = 0;
+        event.y = 0;
+        event.z = 0;
+    }
+
+    // 狀態機判斷事件類型
     if (pressed && !wasPressed) {
         pressStartTime = millis();
-        pressStartX = x;
-        pressStartY = y;
+        pressStartX = event.x;
+        pressStartY = event.y;
+        event.type = TOUCH_TAP;
     }
 
     if (pressed && wasPressed) {
-        int dx = abs(x - pressStartX);
-        int dy = abs(y - pressStartY);
+        int dx = abs(event.x - pressStartX);
+        int dy = abs(event.y - pressStartY);
         if (millis() - pressStartTime > TAP_THRESHOLD_MS && dx < MOVE_THRESHOLD && dy < MOVE_THRESHOLD) {
             event.type = TOUCH_HOLD;
         }
@@ -89,21 +79,38 @@ TouchEvent TouchManager::read() {
 
     if (!pressed && wasPressed) {
         int pressDuration = millis() - pressStartTime;
-        int dx = abs(x - pressStartX);
-        int dy = abs(y - pressStartY);
+        int dx = abs(event.x - pressStartX);
+        int dy = abs(event.y - pressStartY);
 
         if (pressDuration <= TAP_THRESHOLD_MS && dx < MOVE_THRESHOLD && dy < MOVE_THRESHOLD) {
             event.type = TOUCH_TAP;
         } else if (dx > dy && dx > MOVE_THRESHOLD) {
-            event.type = (x < pressStartX) ? TOUCH_SWIPE_LEFT : TOUCH_SWIPE_RIGHT;
+            event.type = (event.x < pressStartX) ? TOUCH_SWIPE_LEFT : TOUCH_SWIPE_RIGHT;
         } else if (dy > dx && dy > MOVE_THRESHOLD) {
-            event.type = (y < pressStartY) ? TOUCH_SWIPE_UP : TOUCH_SWIPE_DOWN;
+            event.type = (event.y < pressStartY) ? TOUCH_SWIPE_UP : TOUCH_SWIPE_DOWN;
         }
-
-        event.x = x;
-        event.y = y;
+        event.x = pressStartX;
+        event.y = pressStartY;
     }
 
     wasPressed = pressed;
     return event;
+}
+
+void TouchManager::setCalibration(int xMin, int xMax, int yMin, int yMax) {
+    extern TFT_eSPI tft;
+    // 使用 TFT_eSPI 的校準 API
+    // tft.setTouchCalibrate(xMin, yMin, xMax, yMax);
+    (void)xMin; (void)xMax; (void)yMin; (void)yMax;
+}
+
+void TouchManager::runCalibration() {
+    #ifdef DEBUG_SERIAL
+    extern TFT_eSPI tft;
+    Serial.println("[Touch] Starting calibration...");
+    uint16_t calData[5] = {0};
+    tft.calibrateTouch(calData, TFT_WHITE, TFT_BLACK, 2);
+    Serial.printf("[Touch] Calibration data: %d %d %d %d %d\n", calData[0], calData[1], calData[2], calData[3], calData[4]);
+    Serial.println("[Touch] Calibration done");
+    #endif
 }

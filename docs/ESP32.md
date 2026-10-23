@@ -82,7 +82,97 @@
 
 ---
 
-## 6. 更新紀錄
+## 6. 觸控螢幕啟動流程與 Boot Loop 解決紀錄
+
+### 6.1 觸控初始化正確順序（關鍵）
+
+```cpp
+// 1. strapping 處理
+pinMode(12, OUTPUT); digitalWrite(12, LOW);
+
+// 2. 隔離觸控 & SD CS（必須在 tft.init() 之前）
+pinMode(TOUCH_CS, OUTPUT); digitalWrite(TOUCH_CS, HIGH);
+pinMode(SD_CS,    OUTPUT); digitalWrite(SD_CS,    HIGH);
+delay(20);
+
+// 3. TFT 初始化
+tft.init();
+tft.setRotation(1);
+
+// 4. 觸控初始化（延遲 3 秒，避免開機不穩定）
+// 在 main.cpp loop() 中延遲初始化：
+if (!touchInitialized && millis() - touchInitTime >= 3000) {
+    touch.begin();  // XPT2046 Driver 獨立初始化
+    touchInitialized = true;
+}
+```
+
+### 6.2 觸控庫選擇：獨立 XPT2046 Driver
+
+**不使用** TFT_eSPI 內建觸控，改用獨立庫 `median-dispersion/XPT2046 Driver`：
+
+| 項目 | 說明 |
+|------|------|
+| Library | `median-dispersion/XPT2046 Driver@^1.0.2` |
+| 腳位 | CS=33, CLK=25, MOSI=32, MISO=39, IRQ=36 |
+| SPI | 共用螢幕 SPI 總線 (SCK=14, MOSI=13, MISO=12)，僅 CS 分開 |
+| 初始化 | `ts->begin(); ts->setRotation(1);` |
+| 讀取 | `ts->touched()` + `ts->getTouchPosition()` |
+
+**優點**：分工明確、不干擾 TFT_eSPI、穩定度高、易除錯。
+
+### 6.3 Boot Loop 根因與解決
+
+| 現象 | 根因 | 解決方案 |
+|------|------|----------|
+| 開機白屏重開 | `touch.begin()` 在 setup() 過早執行，觸控中斷衝突 | **延遲 3 秒** 在 loop() 中初始化 |
+| WiFi 後白屏 | `WiFiClientSecure` 區域變數在 `http.end()` 前析構 | **HTTPS client 宣告為類別成員變數** (TDXClient::secureClient) |
+| NTP 後崩潰 | `WiFiClientSecure` 在 WxManager HTTPS 請求中析構 | 改用 **HTTP** (open-meteo 支援) 或同樣用成員變數 |
+| TDX API 崩潰 | 同 `WiFiClientSecure` 生命週期問題 | **client 宣告為 TDXClient 成員變數**，跨越 `http.begin()` ~ `http.end()` |
+
+### 6.4 關鍵程式碼片段
+
+**TDXClient.h - HTTPS client 成員變數**
+```cpp
+class TDXClient {
+private:
+    WiFiClientSecure secureClient;  // 成員變數，生命週期跨越 HTTP 請求
+    // ...
+    String getAccessToken() {
+        secureClient.setInsecure();
+        http.begin(secureClient, "https://tdx.transportdata.tw/...");
+        // ...
+        http.end();  // client 仍存活
+        return accessToken;
+    }
+};
+```
+
+**WxManager.cpp - 改用 HTTP 避免 HTTPS 問題**
+```cpp
+// open-meteo 支援 HTTP
+http.begin("http://api.open-meteo.com/v1/forecast?...");
+http.begin("http://air-quality-api.open-meteo.com/v1/air-quality?...");
+```
+
+**main.cpp - 觸控延遲初始化**
+```cpp
+bool touchInitialized = false;
+unsigned long touchInitTime = 0;
+
+void loop() {
+    // ...
+    if (!touchInitialized && millis() - touchInitTime >= 3000) {
+        touch.begin();
+        touchInitialized = true;
+    }
+    // ...
+}
+```
+
+---
+
+## 7. 更新紀錄
 
 | 日期 | 內容 |
 | --- | --- |

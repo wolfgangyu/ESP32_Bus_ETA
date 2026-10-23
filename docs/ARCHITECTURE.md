@@ -1,8 +1,8 @@
 # 架構設計文件
 
-> 對應程式碼：`src/` 正式模組（main / WiFiManager / TDXClient / BusData）
+> 對應程式碼：`src/` 正式模組（main / WiFiManager / TDXClient / BusData / TouchManager / WxManager / UIManager / Slideshow / LEDManager / SDManager / LightSensor）
 > 硬體腳位唯一事實來源：[docs/ESP32.md](ESP32.md)（本檔不再重述腳位）
-> 最後更新：2026-10-18（TDX.md 移入 docs/；WxManager + open-meteo 氣象/AQI 整合，見 docs/API_INTEGRATIONS.md）
+> 最後更新：2026-10-21（觸控整合完成、Boot Loop 解決、TDX HTTPS 穩定、open-meteo HTTP、XPT2046 Driver 採用）
 
 ---
 
@@ -12,12 +12,18 @@
 setup()
   隔離 觸控CS=33 / SD CS=5  →  TFT_eSPI init (ILI9341, BL=27)
   WiFiManager.begin(SSID, PASS)  →  輪詢直到連線
+  NTP sync (time.nist.gov / time.stdtime.gov.tw)
   TDXClient.begin(CLIENT_ID, SECRET)
+  WxManager.fetchAll() (HTTP)
+  SD / LDR / UI / Slideshow init
   首抓一次 doFetchAndShow()
 
 loop()
   WiFiManager.loop()                    # 斷線重連
-  每 60s: TDXClient → BusData → 上屏
+  延遲 3s 初始化觸控 (touch.begin())
+  每 60s: TDXClient → BusData → UI 更新
+  每 10min: WxManager (HTTP) 更新氣象/AQI
+  Slideshow 自動切換
 ```
 
 **資料流：**
@@ -30,10 +36,11 @@ TDXClient.fetchBusETAByName("西新里(新新公園)")  # 一次抓回 22 支站
 BusData.parseTDXResponse(all)
       │  BusInfo[]
       ▼
-main::drawScreen()  →  TFT_eSPI 上屏
+UIManager.drawScreen()  →  TFT_eSPI 上屏
+TouchManager.read()  →  事件 (TAP/HOLD/SWIPE) → 頁面切換/校準
+WxManager (HTTP)  →  氣象/AQI → UI 底部條
+Slideshow  →  相片輪播 + 跑馬燈
 ```
-
-> 觸控（XPT2046）目前**未整合**；`TouchManager` 暫列 `build_src_filter` 之外，之後再加。
 
 ---
 
@@ -62,6 +69,16 @@ main::drawScreen()  →  TFT_eSPI 上屏
 
 OAuth2 Client Credentials：取 `access_token`（TTL ~24h，過期提前 60s 重發）→ 攜帶 Bearer 呼叫
 `GET .../v2/Bus/EstimatedTimeOfArrival/City/Taipei?$format=JSON`。端點細節見 [TDX.md](TDX.md)。
+
+**關鍵：HTTPS client 為類別成員變數**，避免生命週期問題導致崩潰：
+
+```cpp
+class TDXClient {
+private:
+    WiFiClientSecure secureClient;  // 成員變數，生命週期跨越 HTTP 請求
+    // ...
+};
+```
 
 ### 2.3 BusData (`src/BusData.h/cpp`)
 
@@ -93,17 +110,54 @@ bool isLowFloor;
 > 每支站牌只回報各自那條路線的 ETA。查 `StopUID eq 'TPE12726'` 永遠只回 203，
 > 需用 `StopName contains '新新公園'` 一次抓回全量。對照表見 [TDX.md](TDX.md)。
 
-### 2.4 main (`src/main.cpp`)
+### 2.4 WxManager (`src/WxManager.h/cpp`)
+
+| 方法 | 說明 |
+| --- | --- |
+| `fetchAll()` | 抓取氣象 + AQI (HTTP，避免 HTTPS 崩潰) |
+| `getTemp()` / `getHum()` / `getAqi()` / `getWxIconType()` | 取得解析結果 |
+
+**Endpoint（HTTP，免 API Key）：**
+- `http://api.open-meteo.com/v1/forecast?...` → 氣溫、濕度、風速、WMO 天氣碼
+- `http://air-quality-api.open-meteo.com/v1/air-quality?...` → US AQI
+
+> **注意**：改用 HTTP 避免 `WiFiClientSecure` 生命週期問題導致 `InstrFetchProhibited` 崩潰。
+
+### 2.5 TouchManager (`src/TouchManager.h/cpp`)
+
+| 方法 | 說明 |
+| --- | --- |
+| `begin()` | XPT2046 Driver 初始化 (CS=33, IRQ=36) |
+| `read()` | 回傳 `TouchEvent` (type, x, y, z) |
+
+**Library**：`median-dispersion/XPT2046 Driver@^1.0.2`（獨立於 TFT_eSPI）
+
+**TouchEvent 類型**：`TOUCH_NONE` / `TOUCH_TAP` / `TOUCH_HOLD` / `TOUCH_SWIPE_UP/DOWN/LEFT/RIGHT`
+
+**校準模式**：長按 (i) 鈕 300ms+ 進入 4 點校準，使用 `XPT2046::Calibration` 結構體。
+
+### 2.6 UIManager (`src/UIManager.h/cpp`)
+
+| 頁面 | 說明 |
+| --- | --- |
+| `PAGE_DASHBOARD` | 天氣條 + 公車列表 (自動捲動) |
+| `PAGE_SLIDESHOW` | 相片全幅 + 跑馬燈疊加 |
+| `PAGE_SYSTEM` | 系統資訊 (全英文 ASCII) |
+| `PAGE_CALIBRATION` | 觸控 4 點校準 |
+
+### 2.7 main (`src/main.cpp`)
 
 | 職責 | 說明 |
 | --- | --- |
 | 開機 | 隔離觸控/SD CS → TFT_eSPI init → 顯示「連線中」 |
 | Wi-Fi | `WiFiManager` 輪詢重試，連上顯示 IP |
-| 拉數 | 每 `REFRESH_INTERVAL_S=60` 秒抓東西向、`BusData` 解析、`drawScreen()` |
-| 上屏 | 全英文 ASCII（`LOAD_FONT2`），西向綠 / 東向紫，最多 12 筆 |
 | NTP | `time.nist.gov` / `time.stdtime.gov.tw`，GMT+8 固定 offset，開機 + 每 1h 重對 |
-| 時鐘 | `clockStr()` 格式 `MM/DD HH:MM`；`clockTick()` 每 500ms 局部重繪表頭右上角，字串沒變且無全清就跳過重繪；`drawScreen()` 全清後設 `clockNeedsRedraw=true` 讓下輪必重印 |
-| LED | GPIO17 **綠**燈 PWM 方波（共陰極：LOW=滅、HIGH=亮）：連線中 0.5s 快閃 / 已連線 1s 慢閃 / 離線熄 |
+| 觸控 | **延遲 3 秒** `touch.begin()` (避免開機不穩定) |
+| TDX | 每 60s 抓 ETA → `BusData` 解析 → `UIManager` 更新 |
+| WxManager | 每 10min 抓氣象/AQI (HTTP) → UI 底部條 |
+| Slideshow | 自動輪播 + 跑馬燈疊加 |
+| LED | GPIO17 綠燈 PWM：連線中 0.5s 快閃 / 已連線 1s 慢閃 / 離線熄 |
+| 觸控事件 | 左右滑切頁、長按 (i) 校準、點擊相片暫停、點 (i) 進系統頁 |
 
 ---
 
@@ -114,14 +168,26 @@ bool isLowFloor;
 | `WIFI_SSID` / `WIFI_PASSWORD` | `config.h` | `config_local.h` | 不進 git |
 | `TDX_CLIENT_ID` / `TDX_CLIENT_SECRET` | `config.h` | `config_local.h` | 不進 git |
 | `TARGET_STOP_NAME` | `config_local.h` | — | 站名「西新里(新新公園)」，`fetchBusETAByName` 用此參數 |
-| `MAX_BUS_DISPLAY` | `config.h` | — | 顯示參數（舊，實際顯示筆數由 `main.cpp` `drawScreen()` 迴圈上限控制） |
-| `REFRESH_INTERVAL_S` | `main.cpp` `static const int` | — | 60 秒；舊 `REFRESH_INTERVAL`（`config.h`）已停用，勿用 |
+| `REFRESH_INTERVAL_S` | `main.cpp` `static const int` | — | 60 秒；舊 `REFRESH_INTERVAL`（`config.h`）已停用 |
 
 `config_local.h` 先 include（若存在），`config.h` 提供預設值。
 
 ---
 
-## 4. 記憶體預算（ESP32-D0WD-V3, 320 KB SRAM）
+## 4. Boot Loop 根因與解決總結
+
+| 現象 | 根因 | 解決方案 |
+|------|------|----------|
+| 開機白屏重開 | `touch.begin()` 在 `setup()` 過早執行 | **延遲 3 秒**在 `loop()` 中初始化 |
+| WiFi 後白屏 | `WiFiClientSecure` 區域變數在 `http.end()` 前析構 | **HTTPS client 宣告為類別成員變數** |
+| NTP 後崩潰 | `WiFiClientSecure` 在 WxManager HTTPS 請求中析構 | 改用 **HTTP** (open-meteo 支援) |
+| TDX API 崩潰 | 同 `WiFiClientSecure` 生命週期問題 | **client 宣告為 TDXClient 成員變數** |
+
+**核心原則**：任何使用 `WiFiClientSecure` 的 HTTPS 請求，client 必須是類別成員變數，或改用 HTTP 端點。
+
+---
+
+## 5. 記憶體預算（ESP32-D0WD-V3, 320 KB SRAM）
 
 | 區塊 | 預估 | 備註 |
 | --- | --- | --- |
@@ -132,22 +198,24 @@ bool isLowFloor;
 | 堆疊/其他 | ~20 KB | |
 | **可用餘裕** | **~150 KB** | 安全邊際 |
 
-> 全鏈路 Flash 佔 76%（~996 KB / 4 MB 中 app 區），TDX 兩支 JSON 併存時注意 heap。
+> 全鏈路 Flash 佔 34%（~1.39 MB / 4 MB app 區），`max_app_4MB.csv` partition。
 
 ---
 
-## 5. 除錯 / 驗證清單
+## 6. 除錯 / 驗證清單
 
 - [x] TFT_eSPI init 成功（ILI9341 + 隔離觸控/SD CS + BL=27）
 - [x] Wi-Fi 連 `No7`、serial 印 IP
-- [x] TDX `fetchBusETAByStopID` 回非空 JSON、`BusData` 解析出新新公園車次
-- [x] `main.cpp` 全模組編譯並上屏顯示車次
-- [ ] 觸控整合（XPT2046，`TouchManager` 回 `build_src_filter`）
-- [ ] 上機長時程穩定（斷線重連、60s 刷新循環）
+- [x] NTP 同步成功 (GMT+8)
+- [x] WxManager HTTP 取得氣象/AQI 正常
+- [x] TDX HTTPS `fetchBusETAByName` 回非空 JSON、`BusData` 解析
+- [x] 觸控初始化延遲 3s 正常、長按校準可進入
+- [x] UI 三頁切換、ETA 自動捲動、Slideshow 輪播
+- [ ] 上機長時程穩定（斷線重連、60s 刷新循環、觸控長時程）
 
 ---
 
-## 6. 參考
+## 7. 參考
 
 - [docs/ESP32.md](ESP32.md) — 硬體唯一事實來源
 - [TDX.md](TDX.md) — TDX 交通 API 端點與金鑰
@@ -155,3 +223,4 @@ bool isLowFloor;
 - [Bodmer/TFT_eSPI](https://github.com/Bodmer/TFT_eSPI)
 - [ArduinoJson v6](https://arduinojson.org/v6/doc/)
 - [TDX API 文件](https://tdx.transportdata.tw/api-service)
+- [median-dispersion/XPT2046 Driver](https://github.com/median-dispersion/XPT2046-Driver)

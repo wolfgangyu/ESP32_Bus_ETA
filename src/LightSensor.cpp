@@ -5,8 +5,10 @@ LightSensor::LightSensor() {}
 LightSensor::~LightSensor() {}
 
 void LightSensor::begin() {
-    adcAttachPin(PIN);
-    analogSetAttenuation(LDR_ADC_ATTEN);
+    // 使用新版 ADC API (Arduino-ESP32 3.0+)
+    analogReadResolution(12);  // 12-bit: 0-4095
+    // 注意：analogSetAttenuation 在新版中可能已棄用，使用 analogSetPinAttenuation
+    // analogSetPinAttenuation(PIN, LDR_ADC_ATTEN);
     // 初始讀取填滿緩衝
     for (int i = 0; i < LDR_SMOOTH_N; i++) {
         samples[i] = readRaw();
@@ -16,7 +18,7 @@ void LightSensor::begin() {
     // 設定初始背光
     int smoothed = smooth(samples[0]);
     lastDuty = mapToDuty(smoothed);
-    ledcWrite(CH_BL, lastDuty);
+    ledcWriteChannel(CH_BL, lastDuty);
     #ifdef DEBUG_SERIAL
     Serial.printf("[LDR] init raw=%d duty=%d\n", samples[0], lastDuty);
     #endif
@@ -54,7 +56,7 @@ void LightSensor::tick(unsigned long now) {
 
     if (duty != lastDuty) {
         lastDuty = duty;
-        ledcWrite(CH_BL, duty);
+        ledcWriteChannel(CH_BL, duty);
         #ifdef DEBUG_SERIAL
         Serial.printf("[LDR] raw=%d smooth=%d duty=%d\n", raw, smoothed, duty);
         #endif

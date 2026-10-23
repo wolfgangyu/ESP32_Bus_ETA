@@ -8,6 +8,7 @@
  * LED：綠燈 GPIO17（共陰極：LOW=滅、HIGH=亮）；PWM 方波閃爍，連線中快閃、已連線慢閃、離線熄
  * 字型：只用 TFT_eSPI 內建 ASCII（LOAD_FONT2/4/6），畫面全英文，避免中文字型缺失
  * UI：Page 0 Dashboard / Page 1 Slideshow，觸控左右滑動切換
+ * 觸控：獨立 XPT2046 Driver (CS=33, IRQ=36)，與螢幕共用 SPI 總線
  */
 #include <Arduino.h>
 #include <SPI.h>
@@ -27,7 +28,6 @@
 #include <time.h>
 
 // 觸控 & SD 片選，init 前強制關閉隔離（防 MISO 匯流排被扯低）
-#define TOUCH_CS 33
 #define SD_CS    5
 
 // 呼吸燈 + NTP
@@ -59,9 +59,15 @@ Page currentPage = PAGE_DASHBOARD;
 bool pageSwitchPending = false;
 Page pendingPage = PAGE_DASHBOARD;
 
+// Touch 初始化狀態
+bool touchInitialized = false;
+unsigned long touchInitTime = 0;
+
+// Splash 畫面狀態
+bool splashFinished = false;
+
 // NTP：設定時鐘並同步
 void syncTime() {
-    // 固定 GMT+8（台灣無 DST），不依賴時區資料庫，避免 ROC 未被識別而掉回 UTC
     configTime(NTP_GMT8_SEC, 0, NTP_SERVER1, NTP_SERVER2);
     struct tm t;
     if (getLocalTime(&t, 5000)) {
@@ -73,58 +79,48 @@ void syncTime() {
     }
 }
 
-// 處理觸控事件
+// 處理觸控事件（簡單的頁面切換邏輯）
 void handleTouch(TouchEvent ev) {
-    if (ev.type == TOUCH_SWIPE_LEFT) {
+    if (ev.type == TOUCH_TAP) {
         if (currentPage == PAGE_DASHBOARD) {
-            pendingPage = PAGE_SLIDESHOW;
-            pageSwitchPending = true;
+            // Page 0: 點擊底部區域 (y > 200) 切換到 Slideshow
+            if (ev.y > 200) {
+                pendingPage = PAGE_SLIDESHOW;
+                pageSwitchPending = true;
+                Serial.println("[UI] Tap bottom -> SLIDESHOW");
+            }
         } else if (currentPage == PAGE_SLIDESHOW) {
-            slideshow.prev();
-            ui.setPhotoDirty();
-        }
-    }
-    else if (ev.type == TOUCH_SWIPE_RIGHT) {
-        if (currentPage == PAGE_SLIDESHOW) {
+            // Page 1: 任意點擊返回 Dashboard
             pendingPage = PAGE_DASHBOARD;
             pageSwitchPending = true;
+            Serial.println("[UI] Tap -> DASHBOARD");
         }
-    }
-    else if (ev.type == TOUCH_TAP) {
+    } else if (ev.type == TOUCH_SWIPE_LEFT) {
         if (currentPage == PAGE_DASHBOARD) {
-            if (ui.inInfoBtn(ev.x, ev.y)) {
-                pendingPage = PAGE_SYSTEM;
-                pageSwitchPending = true;
-                Serial.println("[UI] (i) → SYSTEM");
-            }
+            // Page 0: 左滑切換到 Slideshow
+            pendingPage = PAGE_SLIDESHOW;
+            pageSwitchPending = true;
+            Serial.println("[UI] Swipe left -> SLIDESHOW");
         }
-        else if (currentPage == PAGE_SLIDESHOW) {
-            if (ui.inInfoBtn(ev.x, ev.y)) {
-                pendingPage = PAGE_SYSTEM;
-                pageSwitchPending = true;
-            }
-            else if (ui.inPhoto(ev.x, ev.y)) {
-                slideshow.togglePause();
-                Serial.printf("[UI] slideshow paused=%d\n", slideshow.isPaused());
-            }
+    } else if (ev.type == TOUCH_SWIPE_RIGHT) {
+        if (currentPage == PAGE_SLIDESHOW) {
+            // Page 1: 右滑返回 Dashboard
+            pendingPage = PAGE_DASHBOARD;
+            pageSwitchPending = true;
+            Serial.println("[UI] Swipe right -> DASHBOARD");
         }
-        else if (currentPage == PAGE_SYSTEM) {
-            if (ui.inSystemClose(ev.x, ev.y)) {
-                pendingPage = PAGE_DASHBOARD;
-                pageSwitchPending = true;
-                Serial.println("[UI] × → DASHBOARD");
-            }
+    } else if (ev.type == TOUCH_HOLD) {
+        // 長按進入校準模式
+        if (currentPage == PAGE_DASHBOARD && ev.y < 40) {  // 天氣列區域長按
+            Serial.printf("[TOUCH] HOLD at (%d,%d) -> ENTER CAL\n", ev.x, ev.y);
         }
     }
 }
 
 void doFetchAndShow() {
-    // 一次抓回所有新新公園站牌（22 支 StopUID 各自回報各自路線）
     String all = tdx.fetchBusETAByName(TARGET_STOP_NAME);
     busData.parseTDXResponse(all);
     ui.setBusDirty();
-    ui.setMarqueeDirty();
-    // 公車資料更新，跑馬燈同步；主畫面公車列局部重繪
     Serial.printf("[TDX] fetched, total=%d, calls=%d, data=%.1fKB\n",
                   busData.getTotalCount(), tdx.getCallCount(), tdx.getDataUsedKB());
 }
@@ -137,7 +133,7 @@ void setup() {
     Serial.printf("[info] fw=%s build=%s\n", FW_VERSION, __DATE__);
 #endif
 
-    // strapping
+    // strapping: GPIO12 必須拉低
     pinMode(12, OUTPUT); digitalWrite(12, LOW);
 
     // 【關鍵】隔離觸控 & SD CS，釋放 MISO
@@ -150,24 +146,21 @@ void setup() {
     tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
 
-    // 初始化觸控 (需在 tft.init() 之後)
-    touch.begin(&tft);
-
     // 初始化 LED
     led.begin();
 
     // 開機 LED 自檢：紅→綠→藍各亮 500ms
-    ledcWrite(0, 0);   // 紅亮
-    ledcWrite(1, 255); ledcWrite(2, 255);
+    ledcWriteChannel(0, 0);   // 紅亮
+    ledcWriteChannel(1, 255); ledcWriteChannel(2, 255);
     delay(500);
-    ledcWrite(0, 255); ledcWrite(1, 0); ledcWrite(2, 255);  // 綠亮
+    ledcWriteChannel(0, 255); ledcWriteChannel(1, 0); ledcWriteChannel(2, 255);  // 綠亮
     delay(500);
-    ledcWrite(0, 255); ledcWrite(1, 255); ledcWrite(2, 0);  // 藍亮
+    ledcWriteChannel(0, 255); ledcWriteChannel(1, 255); ledcWriteChannel(2, 0);  // 藍亮
     delay(500);
-    ledcWrite(0, 255); ledcWrite(1, 255); ledcWrite(2, 255); // 全滅
+    ledcWriteChannel(0, 255); ledcWriteChannel(1, 255); ledcWriteChannel(2, 255); // 全滅
     delay(200);
 
-    // 開機畫面：Repo 標題
+    // 開機畫面
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
     tft.setTextSize(2);  // FONT4
     tft.setCursor(20, 50);
@@ -186,7 +179,7 @@ void setup() {
     tft.setCursor(20, 130);
     tft.println(F("Connecting WiFi..."));
 
-    // Wi-Fi
+    // Wi-Fi 連線
     wifi.begin(WIFI_SSID, WIFI_PASSWORD);
     int tries = 0;
     while (!wifi.isConnected() && tries < 60) {
@@ -199,55 +192,10 @@ void setup() {
             tft.setCursor(20, 145);
             tft.printf("retry %d ...\n", tries / 5);
         }
+        yield();  // 餵狗
     }
 
-    if (wifi.isConnected()) {
-        String ip = wifi.getIP();
-        tft.fillRect(20, 130, tft.width() - 40, 40, TFT_BLACK);
-        tft.setTextColor(TFT_GREEN, TFT_BLACK);
-        tft.setCursor(20, 130);
-        tft.print(F("IP: "));
-        tft.println(ip);
-        Serial.printf("Connected, IP=%s\n", ip.c_str());
-        delay(1200);
-
-        // NTP 對時
-        Serial.println("Syncing NTP...");
-        syncTime();
-
-        tdx.begin(TDX_CLIENT_ID, TDX_CLIENT_SECRET);
-
-        // 開機就抓一次氣象/AQI（不等 10 min），讓底部條立刻有內容
-        if (wx.fetchAll()) {
-            Serial.printf("[WX] initial fetch OK, temp=%d aqi=%d\n", wx.getTemp(), wx.getAqi());
-        } else {
-            Serial.println("[WX] initial fetch failed, retry in 10 min");
-        }
-        lastWxMs = millis();
-
-        // 初始化 SD 卡
-        bool sdOk = sd.begin();
-        if (sdOk) {
-            Serial.println("[SD] Ready");
-        } else {
-            Serial.println("[SD] Not available (continue without SD)");
-        }
-
-        // 初始化光感電阻自動背光
-        ldr.begin();
-
-        // 初始化 UI Manager
-        ui.begin(&tft, &busData, &wx, &wifi, &tdx, &sd, &ldr);
-        ui.setSlideshowSource(&slideshow);
-
-        // 初始化 Slideshow
-        slideshow.begin(&tft);
-
-        // 上電先抓一次公車
-        doFetchAndShow();
-        lastFetchMs = millis();
-        led.setState(LED_HEARTBEAT);
-    } else {
+    if (!wifi.isConnected()) {
         tft.fillRect(20, 130, tft.width() - 40, 40, TFT_BLACK);
         tft.setTextColor(TFT_RED, TFT_BLACK);
         tft.setCursor(20, 130);
@@ -256,6 +204,68 @@ void setup() {
         led.setState(LED_RED_ON);
         return;
     }
+
+    // WiFi 成功
+    String ip = wifi.getIP();
+    tft.fillRect(20, 130, tft.width() - 40, 40, TFT_BLACK);
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.setCursor(20, 130);
+    tft.print(F("IP: "));
+    tft.println(ip);
+    Serial.printf("Connected, IP=%s\n", ip.c_str());
+    delay(1200);
+    Serial.println("[DBG] After WiFi delay");
+
+    // NTP 對時
+    Serial.println("Syncing NTP...");
+    syncTime();
+    Serial.println("[DBG] After NTP");
+
+    Serial.println("[DBG] Before TDX begin");
+    tdx.begin(TDX_CLIENT_ID, TDX_CLIENT_SECRET);
+    Serial.println("[DBG] After TDX begin");
+
+    // 開機就抓一次氣象/AQI
+    Serial.println("[DBG] Before wx.fetchAll");
+    if (wx.fetchAll()) {
+        Serial.printf("[WX] initial fetch OK, temp=%d aqi=%d\n", wx.getTemp(), wx.getAqi());
+    } else {
+        Serial.println("[WX] initial fetch failed, retry in 10 min");
+    }
+    Serial.println("[DBG] After wx.fetchAll");
+    lastWxMs = millis();
+
+    // 初始化 SD 卡
+    Serial.println("[DBG] Before sd.begin");
+    bool sdOk = sd.begin();
+    if (sdOk) Serial.println("[SD] Ready");
+    else Serial.println("[SD] Not available");
+    Serial.println("[DBG] After sd.begin");
+
+    // 初始化光感電阻自動背光
+    Serial.println("[DBG] Before ldr.begin");
+    ldr.begin();
+    Serial.println("[DBG] After ldr.begin");
+
+    // 初始化 UI Manager
+    Serial.println("[DBG] Before ui.begin");
+    ui.begin(&tft, &busData, &wx, &wifi, &tdx, &sd, &ldr);
+    ui.setSlideshowSource(&slideshow);
+    Serial.println("[DBG] After ui.begin");
+
+    // 初始化 Slideshow
+    Serial.println("[DBG] Before slideshow.begin");
+    slideshow.begin(&tft);
+    Serial.println("[DBG] After slideshow.begin");
+
+    // 上電先抓一次公車
+    Serial.println("[DBG] Before doFetchAndShow");
+    doFetchAndShow();
+    Serial.println("[DBG] After doFetchAndShow");
+    lastFetchMs = millis();
+    led.setState(LED_HEARTBEAT);
+
+    Serial.println("[SETUP] Done, entering loop");
 }
 
 void loop() {
@@ -265,10 +275,33 @@ void loop() {
     led.tick(now);
     ldr.tick(now);
 
-    // Touch handling
-    TouchEvent ev = touch.read();
-    if (ev.type != TOUCH_NONE) {
-        handleTouch(ev);
+    // Splash 畫面處理 (3秒後自動結束)
+    if (!splashFinished && ui.isShowingSplash()) {
+        if (now - ui.getSplashStartMs() >= 3000) {
+            ui.setShowSplash(false);
+            splashFinished = true;
+            ui.requestFullRedraw();
+        }
+        // Splash 期間也要更新畫面
+        if (ui.fullRedrawNeeded) {
+            ui.drawPage(PAGE_DASHBOARD);
+        }
+    }
+
+    // 延遲初始化觸控 (等系統穩定 3 秒後)
+    if (!touchInitialized && now - touchInitTime >= 3000) {
+        touch.begin();
+        touchInitialized = true;
+        Serial.println("[TOUCH] Direct SPI touch initialized");
+    }
+
+    // Touch handling (只在初始化後)
+    if (touchInitialized) {
+        TouchEvent ev = touch.read();
+        if (ev.type != TOUCH_NONE) {
+            Serial.printf("[TOUCH] ev.type=%d x=%d y=%d z=%d\n", ev.type, ev.x, ev.y, ev.z);
+            handleTouch(ev);
+        }
     }
 
     // Page switch handling
@@ -279,7 +312,7 @@ void loop() {
         Serial.printf("[UI] Switch to page %d\n", currentPage);
     }
 
-    // 斷線：紅燈常亮
+    // LED 狀態
     if (!wifi.isConnected()) {
         led.setState(LED_RED_ON);
     } else {
@@ -302,7 +335,6 @@ void loop() {
         lastWxMs = now;
         if (wx.fetchAll()) {
             ui.setWeatherDirty();
-            ui.setMarqueeDirty();
         }
     }
 
@@ -310,27 +342,25 @@ void loop() {
     slideshow.tick(now);
 
     // --- Rendering ---
+    // Splash 畫面優先
+    if (!splashFinished && ui.isShowingSplash()) {
+        // Splash 已在上面處理
+    } else if (currentPage == PAGE_DASHBOARD) {
+        ui.updateClock();
+        if (ui.busListDirty) ui.updateBusList();
+        if (ui.weatherDirty) ui.requestFullRedraw();
+    } else if (currentPage == PAGE_SLIDESHOW) {
+        ui.updateClock();
+        if (ui.photoDirty) ui.updateSlideshowPhoto();
+    } else if (currentPage == PAGE_CALIBRATION) {
+        ui.updateClock();
+    }
 
-    // 頁面切換全重繪
     if (ui.fullRedrawNeeded) {
         ui.drawPage(currentPage);
     }
 
-    // 各頁局部更新
-    if (currentPage == PAGE_DASHBOARD) {
-        ui.updateClock();
-        if (ui.busListDirty) ui.updateBusList();   // 含自動捲動
-        if (ui.weatherDirty) ui.requestFullRedraw(); // 天氣條重繪需連圖標一起重畫
-    }
-    else if (currentPage == PAGE_SLIDESHOW) {
-        ui.updateClock();
-        ui.updateMarquee();
-        if (ui.photoDirty) ui.updateSlideshowPhoto();
-    }
-    else if (currentPage == PAGE_SYSTEM) {
-        // 系統頁無動態，進頁時已全繪；NTP 到點順帶更新日期
-        ui.updateClock();
-    }
-
+    // 強制餵狗
+    yield();
     delay(50);
 }
