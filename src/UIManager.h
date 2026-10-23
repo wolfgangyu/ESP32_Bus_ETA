@@ -172,7 +172,12 @@ public:
     bool photoDirty = false;
 
     void requestFullRedraw() { fullRedrawNeeded = true; }
-    void setBusDirty() { busListDirty = true; }
+    void setBusDirty() {
+        busListDirty = true;
+        // 新資料到達時重置分頁計時器為現在時間，避免首次載入後立即翻頁
+        lastBusPageMsWest = millis();
+        lastBusPageMsEast = millis();
+    }
     void setWeatherDirty() { weatherDirty = true; busListDirty = true; }
     void setPhotoDirty() { photoDirty = true; }
 };

@@ -205,12 +205,19 @@ void setup() {
 
     // WiFi 成功
     String ip = wifi.getIP();
-    tft.fillRect(20, 130, tft.width() - 40, 40, TFT_BLACK);
+    tft.fillRect(20, 130, tft.width() - 40, 60, TFT_BLACK);
+
+    // 先印 FW 版本（在 TDX+... 下一行）
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setCursor(20, 116);
+    tft.printf("FW: %s", FW_VERSION);
+
+    // 再印 IP（空一行）
     tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    tft.setCursor(20, 130);
+    tft.setCursor(20, 140);
     tft.print(F("IP: "));
     tft.println(ip);
-    Serial.printf("Connected, IP=%s\n", ip.c_str());
+
     delay(1200);
     Serial.println("[DBG] After WiFi delay");
 
@@ -218,10 +225,20 @@ void setup() {
     Serial.println("Syncing NTP...");
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
     tft.setTextSize(1);
-    tft.setCursor(20, 155);
+    tft.setCursor(20, 164);
     tft.println(F("Syncing NTP..."));
     syncTime();
     Serial.println("[DBG] After NTP");
+    tft.fillRect(20, 164, tft.width() - 40, 16, TFT_BLACK);  // 清除 Syncing NTP...
+    struct tm t;
+    if (getLocalTime(&t)) {
+        tft.setTextColor(TFT_GREEN, TFT_BLACK);
+        tft.setCursor(20, 164);
+        tft.printf("%04d-%02d-%02d %02d:%02d:%02d",
+                    t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+                    t.tm_hour, t.tm_min, t.tm_sec);
+        delay(800);  // 短暫顯示時間
+    }
 
     Serial.println("[DBG] Before TDX begin");
     tdx.begin(TDX_CLIENT_ID, TDX_CLIENT_SECRET);
@@ -253,6 +270,7 @@ void setup() {
     Serial.println("[DBG] Before ui.begin");
     ui.begin(&tft, &busData, &wx, &wifi, &tdx, &sd, &ldr);
     ui.setSlideshowSource(&slideshow);
+    ui.setShowSplash(true);   // 啟動 Splash 計時器
     Serial.println("[DBG] After ui.begin");
 
     // 初始化 Slideshow
@@ -266,6 +284,9 @@ void setup() {
     Serial.println("[DBG] After doFetchAndShow");
     lastFetchMs = millis();
     led.setState(LED_HEARTBEAT);
+
+    // 啟動 Splash 計時器（setup 已顯示 IP + NTP 時間，loop 只需等 3 秒總時長）
+    ui.setShowSplash(true);
 
     Serial.println("[SETUP] Done, entering loop");
 }
@@ -282,17 +303,8 @@ void loop() {
         if (now - ui.getSplashStartMs() >= 3000) {
             splashFinished = true;
             ui.requestFullRedraw();
-        } else {
-            // 每 500ms 重畫一次：NTP 一對到時就立刻把時間顯示出來
-            static unsigned long lastSplashMs = 0;
-            if (now - lastSplashMs >= 500) {
-                lastSplashMs = now;
-                ui.requestFullRedraw();
-            }
         }
-        if (!splashFinished) {
-            ui.drawSplashScreen();
-        }
+        // setup() 已畫好 IP + NTP 時間，這裡只需等待 3 秒，不重複繪製
     }
 
     // 延遲初始化觸控 (等系統穩定 3 秒後)
@@ -345,22 +357,22 @@ void loop() {
     slideshow.tick(now);
 
     // --- Rendering ---
-    // Splash 畫面優先
-    if (!splashFinished && ui.isShowingSplash()) {
-        // Splash 已在上面處理
-    } else if (currentPage == PAGE_DASHBOARD) {
-        ui.updateClock();
-        ui.updateBusList();   // 每輪都呼叫：內部會檢查 8 秒翻頁計時，必要時才重繪
-        if (ui.weatherDirty) ui.requestFullRedraw();
-    } else if (currentPage == PAGE_SLIDESHOW) {
-        ui.updateClock();
-        if (ui.photoDirty) ui.updateSlideshowPhoto();
-    } else if (currentPage == PAGE_CALIBRATION) {
-        ui.updateClock();
-    }
+    // Splash 畫面優先：setup() 已畫好，3 秒內不重繪
+    if (splashFinished) {
+        if (currentPage == PAGE_DASHBOARD) {
+            ui.updateClock();
+            ui.updateBusList();   // 每輪都呼叫：內部會檢查 8 秒翻頁計時，必要時才重繪
+            if (ui.weatherDirty) ui.requestFullRedraw();
+        } else if (currentPage == PAGE_SLIDESHOW) {
+            ui.updateClock();
+            if (ui.photoDirty) ui.updateSlideshowPhoto();
+        } else if (currentPage == PAGE_CALIBRATION) {
+            ui.updateClock();
+        }
 
-    if (ui.fullRedrawNeeded) {
-        ui.drawPage(currentPage);
+        if (ui.fullRedrawNeeded) {
+            ui.drawPage(currentPage);
+        }
     }
 
     // 強制餵狗

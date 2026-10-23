@@ -131,34 +131,41 @@ h1 { font-size:14px; color:var(--dim); font-weight:600; max-width:640px; text-al
 </style>
 </head>
 <body>
-<h1>Bus ETA — v7: Splash(SD+FW) + Page0 ETA(3筆/5s) + Page1 Slideshow全螢幕無跑馬燈 + 無系統頁</h1>
+<h1>Bus ETA — v1.0.0: Splash(IP+NTP) + Page0 ETA(4筆/8s獨立翻頁) + Page1 Slideshow全螢幕 + 夜間暫停 + 觸控修復</h1>
 
 <div class="tabs">
   <button class="on" onclick="show('splash')">Splash</button>
   <button onclick="show('main')">Page 0 ETA</button>
   <button onclick="show('slide')">Page 1 Slideshow</button>
   <button onclick="show('wx')">天氣圖標</button>
+  <button onclick="show('touch')">觸控互動</button>
 </div>
 
 <!-- ===== Splash 畫面 (3秒) ===== -->
 <div class="panel" id="panel-splash">
-  <div class="title">Splash Screen (3秒) — SD卡狀態 + Firmware版本</div>
+  <div class="title">Splash Screen (3秒) — IP + NTP Time</div>
   <div class="screen asc">
     <div class="splash">
       <h1>ESP32 Bus ETA</h1>
       <div class="sub">HW-950  ILI9341</div>
-      <div class="sd ok">SD Card: OK  7.4 GB</div>
-      <div class="fw">FW: v0.2.0</div>
-      <div class="fw">Build: 2026/10/21</div>
-      <div class="loading">Loading...</div>
+      <div class="sub">TDX + open-meteo</div>
+      <div class="fw" style="color:var(--cyan)">FW: v1.0.0</div>
+      <div style="height:16px"></div>
+      <div style="font-size:11px;color:var(--dim);font-family:monospace">IP: 192.168.1.42</div>
+      <div style="height:16px"></div>
+      <div style="font-size:11px;color:var(--fg);font-family:monospace">2026-10-24 14:30:25</div>
     </div>
   </div>
-  <div class="note"><b>Splash (3秒)</b>：顯示 SD 卡狀態(綠=OK/紅=無) + Firmware 版本 + Build 日期</div>
+  <div class="note"><b>Splash (3秒總時長)</b>：setup() 階段依序顯示：<br>
+&nbsp;&nbsp;1. "Connecting WiFi..." → 連線成功顯示 IP (綠字)<br>
+&nbsp;&nbsp;2. "Syncing NTP..." → NTP 同步完成顯示日期時間 (綠字，停留 800ms)<br>
+&nbsp;&nbsp;3. 總時長 3 秒後進入 Page 0 ETA，無閃爍、無重複畫面
+</div>
 </div>
 
 <!-- ===== Page 0: ETA ===== -->
 <div class="panel" id="panel-main">
-  <div class="title">Page 0: ETA — 3筆/頁，每 5 秒自動翻頁，左滑/點底部→Page 1</div>
+  <div class="title">Page 0: ETA — 4筆/頁，東/西向各自獨立 8 秒自動翻頁（>4筆才啟用），左滑/點擊→Page 1</div>
   <div class="screen asc">
     <div class="wxbar">
       <svg class="wx-icon" viewBox="0 0 24 24">
@@ -202,42 +209,28 @@ h1 { font-size:14px; color:var(--dim); font-weight:600; max-width:640px; text-al
     <div class="grid"></div>
   </div>
   <div class="note">
-    <b>Page 0: ETA</b> — 3筆/頁 (西向+東向合併)、5秒自動翻頁、頁碼右上<br>
+    <b>Page 0: ETA</b> — 4筆/頁 (東/西向各自分頁)、東/西向各自 8 秒自動翻頁（>4筆才啟用）、頁碼右上 `W:x/y E:x/y`<br>
     <b>無系統資訊頁、無 (i) 按鈕</b>：簡化為純 ETA 顯示<br>
-    <b>互動</b>：點擊底部區域/左滑 → 切換到 Page 1 Slideshow
+    <b>夜間暫停</b>：01:00–05:00 不抓 TDX，顯示 "NIGHT PAUSE / resume 05:00"<br>
+    <b>互動</b>：點擊/左滑 → 切換到 Page 1 Slideshow；點擊公車列表 → 手動翻頁；長按天氣列 → 觸控校準
   </div>
 </div>
 
 <!-- ===== Page 1: Slideshow 全螢幕 ===== -->
 <div class="panel" id="panel-slide">
-  <div class="title">Page 1: Slideshow 全螢幕 — 無跑馬燈，相片佔滿，天氣列保留</div>
+  <div class="title">Page 1: Slideshow 全螢幕 — 無天氣列、無跑馬燈，相片佔滿 320×240</div>
   <div class="screen asc">
-    <div class="wxbar">
-      <svg class="wx-icon" viewBox="0 0 24 24">
-        <circle fill="#F5C518" cx="8" cy="8" r="4"/>
-        <path fill="none" stroke="var(--fg)" stroke-width="1.8" d="M8 19 h9 a3.6 3.6 0 0 0 0-7 a5 5 0 0 0-8.7-1.8 a3.6 3.6 0 0 0 .7 8.8z"/>
-      </svg>
-      <span class="wx-t">17°</span>
-      <span class="wx-txt">CLOUDY<br>AQI 49 · RH 83%</span>
-      <div class="wx-right">
-        <div style="line-height:1.25">
-          <div class="clk">08:23</div>
-          <div class="dt">SAT 10/18</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="slideview">
+    <div class="slideview" style="top:0; height:240px;">
       <div class="placeholder">
         <div class="name">photo_007.jpg</div>
-        <div class="hint">3:2 crop · 320×200</div>
+        <div class="hint">320×240 fullscreen · stream decode</div>
       </div>
     </div>
     <div class="grid"></div>
   </div>
   <div class="note">
-    <b>Page 1: Slideshow 全螢幕</b> — 相片佔滿 200px 高度 (保留頂部 40px 天氣列)<br>
-    <b>無跑馬燈、無 footer</b>：相片最大化顯示<br>
+    <b>Page 1: Slideshow 全螢幕</b> — 相片佔滿 320×240，**完全移除天氣列、跑馬燈、footer**<br>
+    <b>串流解碼</b>：`TJpgDec.drawSdJpg()`，不佔用 200KB 大緩衝<br>
     <b>互動</b>：任意點擊/右滑 → 返回 Page 0 ETA
   </div>
 </div>
@@ -261,42 +254,45 @@ h1 { font-size:14px; color:var(--dim); font-weight:600; max-width:640px; text-al
 </div>
 
 <!-- ===== 觸控互動總表 ===== -->
-<div class="panel">
-  <div class="title">觸控互動對照表</div>
+<div class="panel hidden" id="panel-touch">
+  <div class="title">觸控互動對照表 (v1.0.0)</div>
   <div class="note" style="font-family:monospace; font-size:12px; line-height:1.8;">
     <b>Page 0 (ETA):</b><br>
-    &nbsp;&nbsp;• 點擊底部區域 (y > 200) → 切換到 Page 1 Slideshow<br>
-    &nbsp;&nbsp;• 左滑 (Swipe Left) → 切換到 Page 1 Slideshow<br>
-    &nbsp;&nbsp;• 點擊公車列表區 → 手動翻頁<br>
+    &nbsp;&nbsp;• 點擊 / 左滑 → 切換到 Page 1 Slideshow<br>
+    &nbsp;&nbsp;• 點擊公車列表區 → 手動翻頁 (循環)<br>
     &nbsp;&nbsp;• 長按天氣列 (y < 40) → 進入觸控校準模式<br><br>
-    <b>Page 1 (Slideshow):</b><br>
+    <b>Page 1 (Slideshow 全螢幕):</b><br>
     &nbsp;&nbsp;• 任意點擊 → 返回 Page 0 ETA<br>
     &nbsp;&nbsp;• 右滑 (Swipe Right) → 返回 Page 0 ETA<br><br>
     <b>Splash (3秒):</b><br>
-    &nbsp;&nbsp;• 自動結束，進入 Page 0 ETA<br>
+    &nbsp;&nbsp;• 自動結束 → 進入 Page 0 ETA<br>
   </div>
 </div>
 
-<!-- ===== 硬體問題記錄 ===== -->
-<div class="panel" style="background:#2a1a1a; border-color:#663333;">
-  <div class="title" style="color:#f88">⚠ 硬體問題記錄</div>
-  <div class="note" style="color:#fbb">
-    <b>觸控完全失效</b>：XPT2046 觸控控制器無法偵測觸控<br>
-    • <code>tft.getTouch()</code> 永遠回傳 <code>pressed=0</code><br>
-    • VSPI 腳位 (GPIO 25/32/39/33) 或 IRQ (GPIO 36) 可能未正確接線<br>
-    • 實體跳線/排線需確認：CS=33, CLK=25, MOSI=32, MISO=39, IRQ=36<br>
-    • 建議用示波器/邏輯分析儀確認 VSPI 訊號
+<!-- ===== 硬體問題記錄（歷史紀錄） ===== -->
+<div class="panel" style="background:#1a2a1a; border-color:#336633;">
+  <div class="title" style="color:#8f8">✓ 硬體問題已解決 (v1.0.0)</div>
+  <div class="note" style="color:#bfb">
+    <b>觸控已修復</b>：TFT_eSPI 內建 XPT2046 支援 (HSPI, CS=33)<br>
+    • <code>-D USE_HSPI_PORT=1</code>：TFT+觸控走 HSPI，VSPI 完整留給 SD 卡<br>
+    • <code>tft.getTouch(&x, &y, 600)</code> 正常回傳已校準座標<br>
+    • 校準值：X0=300, X1=3800, Y0=300, Y1=3800, flags=0（存於 config_local.h）<br>
+    <br>
+    <b>關鍵修正</b>：<br>
+    • 手動 SPI 讀 XPT2046 暫存器不可行（永遠回 0）→ 改用 TFT_eSPI 內建<br>
+    • SD 搶走 VSPI 導致觸控讀到錯腳位 → <code>USE_HSPI_PORT=1</code> 解決<br>
+    • <code>touch.begin(&tft)</code> 必須傳 tft 指標，否則 initialized 不成立
   </div>
 </div>
 
 <script>
 function show(k){
-  const map = {splash:'panel-splash', main:'panel-main', slide:'panel-slide', wx:'panel-wx'};
+  const map = {splash:'panel-splash', main:'panel-main', slide:'panel-slide', wx:'panel-wx', touch:'panel-touch'};
   for (const [key, id] of Object.entries(map)){
     document.getElementById(id).classList.toggle('hidden', key!==k);
   }
   document.querySelectorAll('.tabs button').forEach((b,i)=>{
-    const names=['splash','main','slide','wx'];
+    const names=['splash','main','slide','wx','touch'];
     b.classList.toggle('on', names[i]===k);
   });
 }

@@ -24,9 +24,9 @@ void UIManager::begin(TFT_eSPI* t, BusData* b, WxManager* w,
     wifi = wf; tdx = td; sd = s; ldr = l;
     calcMetrics();
     s_active = this;
-    // 初始化翻頁計時器，避免首次資料載入後立即翻頁
-    lastBusPageMsWest = millis();
-    lastBusPageMsEast = millis();
+    // 分頁計時器在第一次資料到達時才初始化 (避免開機 8 秒後立即翻頁)
+    lastBusPageMsWest = 0;
+    lastBusPageMsEast = 0;
 }
 
 void UIManager::calcMetrics() {
@@ -367,6 +367,7 @@ void UIManager::updateBusScroll() {
 
     // 西向：>3 筆才自動翻頁，否則固定第 1 頁
     if (totalWest > ITEMS_PER_PAGE) {
+        if (lastBusPageMsWest == 0) lastBusPageMsWest = now;  // 首次資料到達，初始化計時器
         if (now - lastBusPageMsWest >= BUS_PAGE_MS) {
             lastBusPageMsWest = now;
             busPageIndexWest = (busPageIndexWest + 1) % pagesWest;
@@ -381,6 +382,7 @@ void UIManager::updateBusScroll() {
 
     // 東向：同上
     if (totalEast > ITEMS_PER_PAGE) {
+        if (lastBusPageMsEast == 0) lastBusPageMsEast = now;  // 首次資料到達，初始化計時器
         if (now - lastBusPageMsEast >= BUS_PAGE_MS) {
             lastBusPageMsEast = now;
             busPageIndexEast = (busPageIndexEast + 1) % pagesEast;
@@ -575,10 +577,6 @@ void UIManager::drawCalibrationPage(int currentPoint, int16_t* calX, int16_t* ca
 }
 // ── 開機畫面 ──
 void UIManager::drawSplashScreen() {
-    static bool splashDrawn = false;
-    if (splashDrawn) return;
-    splashDrawn = true;   // 靜態內容只畫一次
-
     tft->fillScreen(BG);
     tft->setTextSize(2);
     tft->setTextColor(C_FG, BG);

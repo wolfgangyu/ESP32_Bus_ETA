@@ -193,6 +193,15 @@ photoH = 240          // Slideshow 全螢幕高度
 - 無相片時顯示 `NO PHOTO` / `Put JPG on SD` 佔位框
 - 串流解碼：`TJpgDec.drawSdJpg()`，不佔用大量 RAM
 
+### Splash 畫面（v1.0.0 新規格）
+- **總時長 3 秒**（在 `setup()` 階段畫好，`loop()` 只等待）
+- 依序顯示：
+  1. `ESP32 Bus ETA` / `HW-950 ILI9341` / `TDX + open-meteo`
+  2. `FW: v1.0.0`（從 `config.h FW_VERSION` 讀取）
+  3. `IP: 192.168.x.x`（WiFi 連線成功後，綠字）
+  4. `Syncing NTP...` → 同步完成顯示 `2026-10-24 14:30:25`（綠字，停留 800ms）
+- 3 秒後自動進入 Page 0 ETA，**無閃爍、無重複畫面**
+
 ---
 
 ## 狀態機 (3 頁)
