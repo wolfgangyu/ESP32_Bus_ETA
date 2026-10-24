@@ -62,7 +62,7 @@
 // =============================================
 // dev = 開發中；出 release 時改成 vX.Y.Z 等
 #ifndef FW_VERSION
-#define FW_VERSION "v1.0.0"
+#define FW_VERSION "v1.1.0"
 #endif
 
 // =============================================
