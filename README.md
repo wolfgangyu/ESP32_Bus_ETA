@@ -97,6 +97,8 @@ pio device monitor
 ██████████ 100%  open-meteo 天氣 + AQI（天氣列 40px，10min 週期）
 ██████████ 100%  觸控整合（TFT_eSPI 內建 XPT2046，校準完成）
 ██████████ 100%  UI 定版（Splash/NTP、4筆/頁、8秒自動翻頁、夜間暫停、全螢幕 Slideshow）
+██████████ 100%  Slideshow RGB565 byte-order 修正、首張不重複繪製
+██████████ 100%  多縣市 TDX 支援（TARGET_CITY 設定、動態端點）
 ```
 
 里程碑：
@@ -105,10 +107,11 @@ pio device monitor
 - 2026-10-17 螢幕正式跑通；改用官方 TFT_eSPI + ILI9341，確認背光 27、init 需隔離觸控/SD CS，TDX 東西向到站資料上屏成功。
 - 2026-10-18 整合 open-meteo 天氣與 AQI（免金鑰），TDX.md 移入 docs/
 - 2026-10-23 **v1.0.0 發布**：觸控修復、Splash 顯示 NTP 時間、公車分頁 4筆/8秒/東西向獨立、夜間 01–05 暫停 TDX、Slideshow 全螢幕串流解碼
+- 2026-10-24 **v1.2.0 發布**：Slideshow 色彩修正（setSwapBytes）、雙重繪製修正（drawSlideshow 不設 photoDirty）、TDX 多縣市支援（TARGET_CITY）、授權條款 (LICENSE.md)
 
 ## TDX 多縣市切換說明
 
-目前實作鎖定 **台北市**（`TARGET_CITY = "Taipei"`），站點為 `TARGET_STOP_NAME = "新新公園"`（南港路三段）。TDX API 依縣市分端點，若要改其他縣市：
+TDX API 依縣市分端點。目前實作以 `TARGET_CITY`（`config.h`）動態組端點，預設 `"Taipei"`，站點為 `TARGET_STOP_NAME = "新新公園"`（南港路三段）。若要改其他縣市：
 
 1. **修改 `config.h` 或 `config_local.h`**：
 
@@ -123,7 +126,7 @@ pio device monitor
    - 目前依 `Direction` 欄位（0=去程/1=返程）+ 站序排序判斷東西向
    - 不同縣市路線規劃不同，可能需微調「哪一個 direction 對應東/西向」的對應表
 
-4. **時間表端點**：`TDXClient.cpp` 的 `fetchBusETAByName()` 已用通用 `v2/Bus/EstimatedTimeOfArrival/City/{city}`，僅需改城市代碼即可。
+4. **端點已動態化**：`TDXClient.cpp` 的 `fetchBusETAByName()` 使用 `TARGET_CITY` 組合 URL，改 config 即生效，不需改程式碼。
 
 ## 授權條款
 

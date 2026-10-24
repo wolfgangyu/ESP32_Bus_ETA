@@ -70,12 +70,20 @@ main.cpp
 ## 關鍵規則
 
 - TDX API Key、Wi-Fi 密碼**只能**放在 `include/config_local.h` (gitignored)；金鑰來源備份檔 `/.env` 也已 gitignore，**兩處都**勿上傳
-- `FW_VERSION`（`include/config.h`）預設 `"dev"`；出 release 前手動改成 `v0.x.y` 再建置，開機 serial 會印 `[info] fw=... build=...`。出 release 流程見 `DEVELOPMENT.md` 的 Release 流程章節
+- `TARGET_CITY`（`include/config.h`）控制 TDX 端點城市代碼，預設 `"Taipei"`；改其他縣市時同步更新 `TARGET_STOP_NAME`
+- `FW_VERSION`（`include/config.h`）出 release 前手動改成 `vX.Y.Z` 再建置，開機 serial 會印 `[info] fw=... build=...`。出 release 流程見 `DEVELOPMENT.md` 的 Release 流程章節
+- Slideshow 色彩：`TJpgDec.setSwapBytes(true)` 必須開啟（tjpgd RGB565 高 byte=R，ILI9341 SPI MSB=B），改照片解碼路徑時勿忘
 - 中文回覆、繁體、半形空格分隔英數
 - 先用現成庫，再造輪子；Bug 從第一性原理分析
+
+## 授權
+
+本專案 MIT License，**不得作為商品銷售**；沈伯洋、沈伯洋台北市長競選組織、黑熊學院 三方例外。詳見 `LICENSE.md`。
 
 ## 參考
 
 - docs/ESP32.md — 硬體唯一事實來源
 - docs/ARCHITECTURE.md — 模組分工與資料流
+- docs/TECH_STACK.md — 技術棧、互動邏輯、分頁規格
+- LICENSE.md — 授權條款
 - TDX API: <https://tdx.transportdata.tw/>

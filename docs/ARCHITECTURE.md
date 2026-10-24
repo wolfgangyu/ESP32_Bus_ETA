@@ -2,7 +2,7 @@
 
 > 對應程式碼：`src/` 正式模組（main / WiFiManager / TDXClient / BusData / TouchManager / WxManager / UIManager / Slideshow / LEDManager / SDManager / LightSensor）
 > 硬體腳位唯一事實來源：[docs/ESP32.md](ESP32.md)（本檔不再重述腳位）
-> 最後更新：2026-10-23（v1.0.0：觸控整合完成、UI 定版、Splash 顯示 NTP 時間、8 秒分頁、夜間暫停、全螢幕 Slideshow）
+> 最後更新：2026-10-24（v1.2.0：Slideshow RGB565 byte-order 修正、雙重繪製修正、多縣市 TDX 支援、授權條款）
 
 ---
 
@@ -69,7 +69,7 @@ Slideshow  →  相片輪播 (全螢幕)
 | `isTokenValid()` | token 是否未過期 |
 
 OAuth2 Client Credentials：取 `access_token`（TTL ~24h，過期提前 60s 重發）→ 攜帶 Bearer 呼叫
-`GET .../v2/Bus/EstimatedTimeOfArrival/City/Taipei?$format=JSON`。端點細節見 [TDX.md](TDX.md)。
+`GET .../v2/Bus/EstimatedTimeOfArrival/City/{TARGET_CITY}?$format=JSON`。端點細節見 [TDX.md](TDX.md)。
 
 **關鍵：HTTPS client 為類別成員變數**，避免生命週期問題導致崩潰：
 
@@ -165,6 +165,7 @@ bool isLowFloor;
 | --- | --- | --- | --- |
 | `WIFI_SSID` / `WIFI_PASSWORD` | `config.h` | `config_local.h` | 不進 git |
 | `TDX_CLIENT_ID` / `TDX_CLIENT_SECRET` | `config.h` | `config_local.h` | 不進 git |
+| `TARGET_CITY` | `config.h` | `config_local.h` | TDX 端點城市代碼，預設 `Taipei`；改其他縣市需同步更新站名 |
 | `TARGET_STOP_NAME` | `config_local.h` | — | 站名「西新里(新新公園)」，`fetchBusETAByName` 用此參數 |
 | `REFRESH_INTERVAL_S` | `main.cpp` `static const int` | — | 60 秒；舊 `REFRESH_INTERVAL`（`config.h`）已停用 |
 | `ITEMS_PER_PAGE` | `UIManager.h` `static const int` | — | 4 筆/頁 |
@@ -214,6 +215,9 @@ bool isLowFloor;
 - [x] Splash 顯示 IP + NTP 時間（每 500ms 更新）
 - [x] 公車分頁：東/西向各自 8 秒翻頁，>4 筆才啟用
 - [x] 夜間暫停：01:00-05:00 不抓 TDX，顯示提示
+- [x] Slideshow RGB565 byte-order 正確（紅藍不對調）
+- [x] Slideshow 首張不重複繪製（drawSlideshow 不設 photoDirty）
+- [x] 多縣市 TDX 支援（TARGET_CITY config，端點動態組合）
 - [ ] 上機長時程穩定（斷線重連、60s 刷新循環、觸控長時程）
 
 ---
@@ -229,4 +233,4 @@ bool isLowFloor;
 
 ---
 
-*文件更新: 2026-10-23 (v1.0.0)*
+*文件更新: 2026-10-24 (v1.2.0)*

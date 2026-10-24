@@ -223,7 +223,7 @@ enum Page {
                                    Page 0 (ETA)
 ```
 
-### 互動邏輯 (v1.0.0)
+### 互動邏輯 (v1.2.0 更新)
 
 | 當前頁面 | 觸控動作 | 結果 |
 |---------|---------|------|
@@ -231,8 +231,9 @@ enum Page {
 | Page 0 ETA | 點擊 / 左滑 | → Page 1 Slideshow |
 | Page 0 ETA | 點擊公車列表 | 手動翻頁 (循環) |
 | Page 0 ETA | 長按天氣列 (y < 40) | → Calibration 頁 |
-| Page 1 Slideshow | 任意點擊 | → Page 0 ETA |
-| Page 1 Slideshow | 右滑 | → Page 0 ETA |
+| Page 1 Slideshow | 點擊任意處 | 手動換下一張 (不切頁) |
+| Page 1 Slideshow | 右滑 / 下滑 | → Page 0 ETA |
+| Page 1 Slideshow | 10 秒無操作 | 自動換下一張 |
 | Calibration | 4點點擊 → Done/Save | → Page 0 ETA |
 
 ---
@@ -266,8 +267,8 @@ TDX API (HTTPS)
 ```
 
 ### TDX API
-- **端點**: `/v2/Bus/EstimatedTimeOfArrival/City/Taipei`
-- **篩選**: `contains(StopName/Zh_tw,'西新里(新新公園)')`
+- **端點**: `/v2/Bus/EstimatedTimeOfArrival/City/{TARGET_CITY}` (設定於 `config.h`，預設 `Taipei`)
+- **篩選**: `contains(StopName/Zh_tw,'西新里(新新公園)')` (設定 `TARGET_STOP_NAME`)
 - **更新頻率**: 60 秒
 - **單日呼叫限制**: 依 TDX 方案
 

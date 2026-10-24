@@ -93,7 +93,8 @@ String TDXClient::fetchBusETA(const String& stopName) {
     secureClient.setInsecure();
 
     String encodedStopName = urlEncode(stopName);
-    String url = "https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/Taipei?$format=JSON&$filter=contains(StopName/Zh_tw,'" + encodedStopName + "')&$top=50";
+    String url = String("https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/") + TARGET_CITY
+                 + "?$format=JSON&$filter=contains(StopName/Zh_tw,'" + encodedStopName + "')&$top=50";
 
     #ifdef DEBUG_SERIAL
     Serial.printf("請求 URL: %s\n", url.c_str());
@@ -138,8 +139,8 @@ String TDXClient::fetchBusETAByName(const String& stopNameZh) {
     HTTPClient http;
     secureClient.setInsecure();
 
-    String url = "https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/Taipei"
-                 "?%24format=JSON&%24filter=contains(StopName/Zh_tw,'" + urlEncode(stopNameZh) + "')&%24top=100";
+    String url = String("https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/") + TARGET_CITY
+                 + "?%24format=JSON&%24filter=contains(StopName/Zh_tw,'" + urlEncode(stopNameZh) + "')&%24top=100";
 
     #ifdef DEBUG_SERIAL
     Serial.printf("ETA URL: %s\n", url.c_str());

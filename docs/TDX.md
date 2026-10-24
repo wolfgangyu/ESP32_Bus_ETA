@@ -37,13 +37,15 @@ Authorization: Bearer <token>
 ### 公車即時到站（v2）
 
 ```bash
-GET https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/Taipei
+GET https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/{TARGET_CITY}
   ?$format=JSON
-  &$filter=StopUID eq 'TPE12726'
-  &$top=10
+  &$filter=contains(StopName/Zh_tw,'<TARGET_STOP_NAME>')
+  &$top=100
 Authorization: Bearer <token>
 ```
 
+- `{TARGET_CITY}`：對應 `config.h` 的 `TARGET_CITY`（預設 `Taipei`，可改 `Taichung`、`Kaohsiung`、`NewTaipei` 等）
+- `<TARGET_STOP_NAME>`：對應 `config.h` 的 `TARGET_STOP_NAME`（預設 `新新公園`）
 - 主要回傳欄位：
   - `RouteName`：英文路名（如 "306Shuttle"）
   - `StopName`：站牌名稱
