@@ -34,7 +34,7 @@
 //  目標站牌設定
 // =============================================
 // 南港路三段新新公園站
-
+#define TARGET_CITY        "Taipei"
 #define TARGET_STOP_NAME   "新新公園"
 #define TARGET_STOP_ID     ""  // 若知道具體站牌 ID 請填入，否則用名稱比對
 
@@ -62,7 +62,7 @@
 // =============================================
 // dev = 開發中；出 release 時改成 vX.Y.Z 等
 #ifndef FW_VERSION
-#define FW_VERSION "v1.1.0"
+#define FW_VERSION "v1.2.0"
 #endif
 
 // =============================================

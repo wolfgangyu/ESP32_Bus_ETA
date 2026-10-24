@@ -1,6 +1,6 @@
 # ESP32 公車到站看板
 
-以 HW-950 開發板（ESP32-D0WD-V3，2.4" ILI9341 TFT）顯示台北市南港路三段新新公園站的公車到站時間，外加即時溫度、空氣品質（AQI）與標準局時鐘，當做出門前的快速看板。
+以 HW-950 開發板（ESP32-D0WD-V3，2.4" ILI9341 TFT）顯示台北市南港路三段新新公園站的公車到站時間，外加即時溫度、空氣品質（AQI）與標準局時鐘及照片slideshow，當做出門前的快速看板。
 
 ## 專案簡介
 
@@ -12,6 +12,27 @@
 | 顯示器 | 2.4" TFT，ILI9341，240×320，4-wire SPI（官方 spec 確認） |
 | 觸控 | XPT2046 電阻式（CS=33），與 TFT 共用 HSPI，`-D USE_HSPI_PORT=1` |
 | 通訊 | Wi-Fi 2.4GHz, 藍牙 4.2, USB-C (CH340 燒錄) |
+
+## 畫面架構與互動
+
+目前實作兩個分頁，觸控切換：
+
+```mermaid
+stateDiagram-v2
+    [*] --> SPLASH : 開機 3 秒
+    SPLASH --> DASHBOARD : 自動 / 點擊
+    DASHBOARD --> SLIDESHOW : 左滑 / 點擊任意處
+    DASHBOARD --> CALIBRATION : 長按天氣列 (y<40)
+    SLIDESHOW --> DASHBOARD : 右滑 / 下滑
+    SLIDESHOW --> SLIDESHOW : 點擊 → 下一張 / 10 秒自動換張
+    CALIBRATION --> DASHBOARD : 完成校準
+```
+
+| 頁面 | 內容 | 更新規則 |
+| --- | --- | --- |
+| DASHBOARD | 天氣列 40px（溫度、AQI、時鐘）＋公車列表（西向 4 筆、東向 4 筆） | 公車 60s 輪詢 TDX、天氣 10min、8s 自動翻頁（各向獨立） |
+| SLIDESHOW | 全螢幕 320×240 照片（SD 卡 `/photos`） | 10s 自動換張；點螢幕手動換下一張 |
+| CALIBRATION | 觸控四角點校準（XPT2046） | 長按天氣列進入，完成後回 DASHBOARD |
 
 ## 文件導覽
 
@@ -67,7 +88,7 @@ pio device monitor
 
 上傳後要真正執行，得按板子實體 RST 鈕。
 
-## 目前進度 (v1.0.0 - 2026-10-23)
+## 目前進度 (v1.2.0 - 2026-10-24)
 
 ```text
 ██████████ 100%  螢幕跑通（ILI9341 + TFT_eSPI + init 隔離觸控/SD CS）
@@ -81,11 +102,37 @@ pio device monitor
 里程碑：
 
 - 2026-10-04 專案初始化（PlatformIO + 模組骨架）
-- 2026-10-17 螢幕正式跑通；改用官方 TFT_eSPI + ILI9341，確認背光 27、init 需隔離觸控/SD CS
-- 2026-10-17 TDX 東西向到站資料上屏成功，專案檔案清理
+- 2026-10-17 螢幕正式跑通；改用官方 TFT_eSPI + ILI9341，確認背光 27、init 需隔離觸控/SD CS，TDX 東西向到站資料上屏成功。
 - 2026-10-18 整合 open-meteo 天氣與 AQI（免金鑰），TDX.md 移入 docs/
 - 2026-10-23 **v1.0.0 發布**：觸控修復、Splash 顯示 NTP 時間、公車分頁 4筆/8秒/東西向獨立、夜間 01–05 暫停 TDX、Slideshow 全螢幕串流解碼
 
-## 授權
+## TDX 多縣市切換說明
 
-MIT License，可自由使用、修改、散佈。
+目前實作鎖定 **台北市**（`TARGET_CITY = "Taipei"`），站點為 `TARGET_STOP_NAME = "新新公園"`（南港路三段）。TDX API 依縣市分端點，若要改其他縣市：
+
+1. **修改 `config.h` 或 `config_local.h`**：
+
+   ```cpp
+   #define TARGET_CITY       "Taipei"   // 改為 "Taichung"、"Kaohsiung"、"NewTaipei" 等
+   #define TARGET_STOP_NAME  "新新公園"  // 改為該縣市的站名（需對應 TDX 站名資料）
+   ```
+
+2. **站名查詢**：TDX 站名需符合官方資料格式。可先用 [TDX API 文件](https://tdx.transportdata.tw/) 的「公車站牌資料」端點查詢該縣市站名清單。
+
+3. **方向判斷邏輯**（`BusData.cpp` 的 `parseTDXResponse()`）：
+   - 目前依 `Direction` 欄位（0=去程/1=返程）+ 站序排序判斷東西向
+   - 不同縣市路線規劃不同，可能需微調「哪一個 direction 對應東/西向」的對應表
+
+4. **時間表端點**：`TDXClient.cpp` 的 `fetchBusETAByName()` 已用通用 `v2/Bus/EstimatedTimeOfArrival/City/{city}`，僅需改城市代碼即可。
+
+## 授權條款
+
+本專案採用 **MIT License 條款開放原始碼**，但增加以下限制：
+
+- **不得作為商品銷售**（包含但不限於：成品販售、整合進商業產品販售、授權他人販售獲利）。
+- **例外授權**：下列主體不受上述「不得商品銷售」限制，得自由商業化使用、修改、散佈、授權或販售本專案衍生產品：
+  - 沈伯洋
+  - 沈伯洋台北市長競選組織
+  - 黑熊學院
+
+以上例外主體亦享有完整的 MIT License 權利（使用、複製、修改、合併、發布、散佈、再授權、銷售副本）。

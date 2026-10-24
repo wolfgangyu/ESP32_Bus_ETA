@@ -274,6 +274,8 @@ void setup() {
     // 初始化 Slideshow
     Serial.println("[DBG] Before slideshow.begin");
     slideshow.begin(&tft);
+    // 同步 lastSlideshowIndex，避免第一次進 Slideshow 時重畫兩次
+    lastSlideshowIndex = slideshow.getCurrentIndex();
     Serial.println("[DBG] After slideshow.begin");
 
     // 上電先抓一次公車
@@ -365,6 +367,14 @@ void loop() {
         lastSlideshowIndex = slIndex;
         ui.setPhotoDirty();
     }
+
+    // 頁面剛切換到 Slideshow：tick() 之後、渲染之前同步索引，
+    // 防止 tick() 推進索引後觸發二次重畫
+    static bool wasSlideshow = false;
+    if (currentPage == PAGE_SLIDESHOW && !wasSlideshow) {
+        lastSlideshowIndex = slIndex;  // 強制同步，消除本輪 tick 產生的差異
+    }
+    wasSlideshow = (currentPage == PAGE_SLIDESHOW);
 
     // --- Rendering ---
     // Splash 畫面優先：setup() 已畫好，3 秒內不重繪

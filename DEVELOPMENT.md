@@ -100,7 +100,7 @@ gh release create v0.1.0 \
 
 - `config.h` 預設 `"dev"`；出 release 前手動改成目標版本號
 - 開機 serial 印 `[info] fw=<FW_VERSION> build=<__DATE__>`
-- 螢幕左下小灰字印 `<FW_VERSION> <build date>`（短暫可見，之後被 Wi-Fi 連線畫面覆蓋）
+- CI 檢查：tag 必須與 `config.h` 的 `FW_VERSION` 一致，不一致會 fail（`.github/workflows/release.yml`）
 
 ### Release notes 格式
 

@@ -19,6 +19,11 @@ Slideshow::~Slideshow() {
 void Slideshow::begin(TFT_eSPI* tftPtr) {
     tft = tftPtr;
 
+    // RGB565 byte order 修正：tjpgd 解出的像素是 0xRRGGBB（高 byte = R），
+    // 但 ILI9341 SPI MSB 端是 B（TFT_eSPI 推 0xBGGGR 位元組）。不 swap 會紅藍對調
+    // （橘→綠、白→青、黑→藍紫雜訊），換照片時一起設回 false 保持狀態一致。
+    TJpgDec.setSwapBytes(true);
+
     // 不再預先配置 200KB JPEG 緩衝：改用 TJpgDec.drawSdJpg() 串流解碼，
     // 開機時 WiFi 已佔用大量 heap，200KB 連續記憶體必配置失敗。
 
@@ -212,11 +217,10 @@ bool Slideshow::drawCurrent(int x, int y, int maxW, int maxH) {
         return false;
     }
 
-    // 原始尺寸超過 2× 顯示區時啟用 1/2 降採樣：
-    // 1/1 解碼再縮整張原圖（4000×3000），方塊平均會讓平滑漸變出鋸齒；
-    // 從 2× 起縮較平滑。1/2 以下（≤640×480）保留 1/1 最佳化 1:1 對齊。
+    // 自動選降採樣倍率（1/1、1/2、1/4、1/8）：
+    // 原圖比顯示區大時 1/1 解碼再縮圖會出鋸齒，JPG 硬體 1/2 取樣較平滑。
+    // 320×240 顯示區：640×480 原圖 → 1/2（1:1 顯示）；1280×960 以上 → 1/4。
     uint8_t scale = 0;   // 0=1/1, 1=1/2, 2=1/4, 3=1/8
-    if ((int)w > maxW * 2 && (int)h > maxH * 2) scale = 1;
     while (scale < 3 && (((int)w >> scale) > maxW || ((int)h >> scale) > maxH)) scale++;
     TJpgDec.setJpgScale(1 << scale);
 

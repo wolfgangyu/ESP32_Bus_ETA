@@ -404,8 +404,7 @@ void UIManager::updateBusScroll() {
 void UIManager::drawSlideshow() {
     activePage = PAGE_SLIDESHOW;
     tft->fillScreen(BG);
-    // 相片全螢幕，沒有固定背景邊框（photoDirty 會直接畫整張照片）
-    photoDirty = true;
+    // 相片全螢幕，沒有固定背景邊框（直接畫，不等 photoDirty）
     updateSlideshowPhoto();
 }
 
@@ -606,4 +605,5 @@ void UIManager::drawSplashScreen() {
                     t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
                     t.tm_hour, t.tm_min, t.tm_sec);
     }
+
 }
