@@ -89,6 +89,8 @@ void Slideshow::end() {
 }
 
 bool Slideshow::isValidPhoto(const char* filename) {
+    // Mac 複製到 SD 會附 AppleDouble 副檔（._img_001.jpg），非合法 JPEG，直接跳過
+    if (strncmp(filename, "._", 2) == 0) return false;
     String fn = String(filename);
     fn.toLowerCase();
     for (int i = 0; i < VALID_EXT_COUNT; i++) {
@@ -210,7 +212,11 @@ bool Slideshow::drawCurrent(int x, int y, int maxW, int maxH) {
         return false;
     }
 
+    // 原始尺寸超過 2× 顯示區時啟用 1/2 降採樣：
+    // 1/1 解碼再縮整張原圖（4000×3000），方塊平均會讓平滑漸變出鋸齒；
+    // 從 2× 起縮較平滑。1/2 以下（≤640×480）保留 1/1 最佳化 1:1 對齊。
     uint8_t scale = 0;   // 0=1/1, 1=1/2, 2=1/4, 3=1/8
+    if ((int)w > maxW * 2 && (int)h > maxH * 2) scale = 1;
     while (scale < 3 && (((int)w >> scale) > maxW || ((int)h >> scale) > maxH)) scale++;
     TJpgDec.setJpgScale(1 << scale);
 

@@ -53,9 +53,14 @@ TouchEvent TouchManager::read() {
 
     if (!initialized || !tft) return event;
 
-    // getTouch 回傳邏輯座標（已校準+旋轉，0..width / 0..height），直接用
+    // getTouch 門檻 200（原 600）：端點到端點快速滑動時 Z 值爬坡中，
+    // 高門檻讓 5 次取樣常只剩 1 次有效 → 位移算不出來 → 落回 tap。
+    // 門檻降到 200 讓滑動全程都能抓到座標；鬼觸風險由 Slideshow 頁的
+    // 「點按 = 換照片」（低代價）吸收。回傳值 n = 有效取樣次數（0-5）。
     uint16_t lx = 0, ly = 0;
-    bool pressed = tft->getTouch(&lx, &ly, 600);
+    uint8_t n = tft->getTouch(&lx, &ly, 200);
+    bool pressed = (n > 0);
+    event.z = n;
 
     // 放開時 getTouch() 回 0,0，不能拿它算位移或當事件座標，
     // 否則每次放開都會被誤判成「滑動」且座標為 (0,0)。
@@ -69,41 +74,37 @@ TouchEvent TouchManager::read() {
         x = lastX;   // 沿用最後一次按住的座標
         y = lastY;
     }
-
     event.x = x;
     event.y = y;
-    event.z = pressed ? 1 : 0;
 
     // 狀態機
     if (pressed && !wasPressed) {
         pressStartTime = millis();
         pressStartX = x;
         pressStartY = y;
-    }
-
-    if (pressed && wasPressed) {
+    } else if (pressed) {
+        // 按著期間：HOLD 偵測（起點附近按住超過 TAP_THRESHOLD_MS）
         int dx = abs(x - pressStartX);
         int dy = abs(y - pressStartY);
         if (millis() - pressStartTime > TAP_THRESHOLD_MS && dx < MOVE_THRESHOLD && dy < MOVE_THRESHOLD) {
             event.type = TOUCH_HOLD;
         }
-    }
-
-    if (!pressed && wasPressed) {
+    } else if (wasPressed) {
+        // 放開事件：用「起點→放開點」位移判斷，不靠最後一幀，
+        // 避免 XPT2046 放開瞬間 X 軸漂移把水平手勢算成 tap。
         int pressDuration = millis() - pressStartTime;
-        int dx = abs(x - pressStartX);
-        int dy = abs(y - pressStartY);
-
-        if (pressDuration <= TAP_THRESHOLD_MS && dx < MOVE_THRESHOLD && dy < MOVE_THRESHOLD) {
+        int relX = lastX - pressStartX;
+        int relY = lastY - pressStartY;
+        int absRelX = abs(relX), absRelY = abs(relY);
+        if (pressDuration <= TAP_THRESHOLD_MS && absRelX < MOVE_THRESHOLD && absRelY < MOVE_THRESHOLD) {
             event.type = TOUCH_TAP;
-        } else if (dx > dy && dx > MOVE_THRESHOLD) {
-            event.type = (x < pressStartX) ? TOUCH_SWIPE_LEFT : TOUCH_SWIPE_RIGHT;
-        } else if (dy > dx && dy > MOVE_THRESHOLD) {
-            event.type = (y < pressStartY) ? TOUCH_SWIPE_UP : TOUCH_SWIPE_DOWN;
+        } else if (absRelY > absRelX && absRelY > MOVE_THRESHOLD) {
+            event.type = (relY < 0) ? TOUCH_SWIPE_UP : TOUCH_SWIPE_DOWN;
+        } else if (absRelX > MOVE_THRESHOLD) {
+            event.type = (relX < 0) ? TOUCH_SWIPE_LEFT : TOUCH_SWIPE_RIGHT;
         }
-        // event.x/y 已是放開前最後位置
+        // event.x/y 已是放開前最後位置（最後一幀）
     }
-
     wasPressed = pressed;
     return event;
 }

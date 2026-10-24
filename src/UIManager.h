@@ -45,14 +45,11 @@ struct LayoutMetrics {
     int rowH = 44;         // 單行高度
     int dirLabelH = 20;    // 方向標籤高度
     int visibleRows = 4;   // 4 列 × 44 = 176px + dirLabelH 20 = 196 < 200
-
-    // Slideshow 相片全螢幕
-    int photoTop = 40;
-    int photoH = 200;
 };
 
 class UIManager {
 private:
+    Page activePage = PAGE_DASHBOARD;   // 目前顯示的頁面（決定時鐘是否繪製）
     TFT_eSPI* tft;
     BusData* busData;
     WxManager* wx;

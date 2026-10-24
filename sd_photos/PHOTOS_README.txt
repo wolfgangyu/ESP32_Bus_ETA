@@ -1,20 +1,14 @@
-ESP32 Bus ETA — Photo Slideshow Guidelines
-===========================================
+ESP32 Bus ETA — 照片規格
+========================
 
-Folder: /photos/
-Format: JPEG only (baseline, not progressive)
-Max file size: 200 KB per image
-Max resolution: 240×320 (native), recommended ≤192×192
-Aspect ratios: 3:2, 16:9, 4:3, 1:1 (auto-fit, centered)
-Naming: img_001.jpg, img_002.jpg ... (sequential, max 999)
-Count: Up to 50 images (RAM limited)
+尺寸：640×480 px（4:3，全螢幕鋪滿無黑邊）
+比例：必須 4:3，16:9 手機照要先裁成 4:3 再縮放，否則會留黑邊
+格式：JPEG baseline（非 progressive）
+張數：50 張以內
+容量：單張 ≤ 200 KB（quality 75-80 即可）
+命名：img_001.jpg、img_002.jpg …（依序編號）
 
-⚠️ DO NOT upload phone originals (3-10 MB) — will cause
-   decode failure / watchdog reset / sluggish UI.
+放置：SD 卡根目錄 /photos/
 
-Resize on PC first:
-  macOS:  sips -Z 192 img.jpg --out photos/img_001.jpg
-  Linux:  convert img.jpg -resize 192x192 photos/img_001.jpg
-  Windows: Use Paint / IrfanView batch resize
-
-Tip: JPEG quality 75-80 gives best size/quality trade-off.
+Mac 複製後、推出前清掉附屬檔：
+    rm -f ./photos/._* ./photos/.DS_Store

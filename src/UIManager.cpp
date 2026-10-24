@@ -34,7 +34,6 @@ void UIManager::calcMetrics() {
     m.screenW = tft->width();   // 320
     m.screenH = tft->height();  // 240
     m.listBottom = m.screenH;
-    m.photoH = m.screenH - m.photoTop;
     m.visibleRows = (m.listBottom - m.listTop - m.dirLabelH) / m.rowH;
 }
 
@@ -190,6 +189,9 @@ void UIManager::drawWeatherBar() {
 }
 
 void UIManager::drawHeaderClock() {
+    // Slideshow / Calibration 頁不顯示時鐘（避免照片區浮現突兀色塊）
+    if (activePage != PAGE_DASHBOARD) return;
+
     String c = clockStr();
     String d = dateStr();
     char nc[12], nd[16];
@@ -400,10 +402,10 @@ void UIManager::updateBusScroll() {
 
 // ── Slideshow ──
 void UIManager::drawSlideshow() {
+    activePage = PAGE_SLIDESHOW;
     tft->fillScreen(BG);
-    // 相片區 - 全螢幕 (無天氣列、無跑馬燈)
-    tft->fillRect(0, 0, m.screenW, m.screenH, 0x0A1A2E);
-    photoDirty = true;          // 進這頁一定要畫一次（否則無相片時會留空）
+    // 相片全螢幕，沒有固定背景邊框（photoDirty 會直接畫整張照片）
+    photoDirty = true;
     updateSlideshowPhoto();
 }
 
@@ -411,7 +413,6 @@ void UIManager::updateSlideshowPhoto() {
     if (!photoDirty) return;
     TJpgDec.setCallback(jpegCallback);
 
-    // 全螢幕 320×240，串流解碼（不需要 200KB 緩衝）
     bool ok = slideshow && slideshow->drawCurrent(0, 0, m.screenW, m.screenH);
     if (!ok) drawPhotoPlaceholder();
 
@@ -435,6 +436,7 @@ void UIManager::drawPhotoPlaceholder() {
 }
 
 void UIManager::drawPage(Page p) {
+    activePage = p;
     switch (p) {
         case PAGE_DASHBOARD:
             tft->fillScreen(BG);

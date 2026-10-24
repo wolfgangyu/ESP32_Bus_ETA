@@ -54,6 +54,7 @@ static const unsigned long WX_REFRESH_MS = 10 * 60 * 1000;  // 氣象/AQI 10 min
 static unsigned long lastFetchMs = 0;
 static unsigned long lastWxMs    = 0;
 static unsigned long lastNtpMs = 0;
+static int lastSlideshowIndex = -1;
 
 Page currentPage = PAGE_DASHBOARD;
 bool pageSwitchPending = false;
@@ -88,10 +89,10 @@ void handleTouch(TouchEvent ev) {
             pageSwitchPending = true;
             Serial.printf("[UI] Tap (%d,%d) -> SLIDESHOW\n", ev.x, ev.y);
         } else if (currentPage == PAGE_SLIDESHOW) {
-            // Page 1: 任意點擊返回 Dashboard
-            pendingPage = PAGE_DASHBOARD;
-            pageSwitchPending = true;
-            Serial.println("[UI] Tap -> DASHBOARD");
+            // Page 1: 點照片 → 手動換下一張（切頁請用右滑）
+            slideshow.next();
+            ui.setPhotoDirty();
+            Serial.printf("[UI] Tap (%d,%d) -> photo next\n", ev.x, ev.y);
         }
     } else if (ev.type == TOUCH_SWIPE_LEFT) {
         if (currentPage == PAGE_DASHBOARD) {
@@ -102,10 +103,17 @@ void handleTouch(TouchEvent ev) {
         }
     } else if (ev.type == TOUCH_SWIPE_RIGHT) {
         if (currentPage == PAGE_SLIDESHOW) {
-            // Page 1: 右滑返回 Dashboard
+            // Page 1: 右滑返回 Dashboard（下滑 TOUCH_SWIPE_DOWN 也當作返回，
+            // 因 XPT2046 右滑偵測常受 X 軸漂移影響而失敗）
             pendingPage = PAGE_DASHBOARD;
             pageSwitchPending = true;
             Serial.println("[UI] Swipe right -> DASHBOARD");
+        }
+    } else if (ev.type == TOUCH_SWIPE_DOWN) {
+        if (currentPage == PAGE_SLIDESHOW) {
+            pendingPage = PAGE_DASHBOARD;
+            pageSwitchPending = true;
+            Serial.println("[UI] Swipe down -> DASHBOARD");
         }
     } else if (ev.type == TOUCH_HOLD) {
         // 長按進入校準模式
@@ -244,16 +252,6 @@ void setup() {
     tdx.begin(TDX_CLIENT_ID, TDX_CLIENT_SECRET);
     Serial.println("[DBG] After TDX begin");
 
-    // 開機就抓一次氣象/AQI
-    Serial.println("[DBG] Before wx.fetchAll");
-    if (wx.fetchAll()) {
-        Serial.printf("[WX] initial fetch OK, temp=%d aqi=%d\n", wx.getTemp(), wx.getAqi());
-    } else {
-        Serial.println("[WX] initial fetch failed, retry in 10 min");
-    }
-    Serial.println("[DBG] After wx.fetchAll");
-    lastWxMs = millis();
-
     // 初始化 SD 卡
     Serial.println("[DBG] Before sd.begin");
     bool sdOk = sd.begin();
@@ -345,16 +343,28 @@ void loop() {
         doFetchAndShow();
     }
 
-    // 氣象/AQI 10 min
-    if (wifi.isConnected() && now - lastWxMs >= WX_REFRESH_MS) {
+    // 氣象/AQI：開機後（splash 結束）立即抓一次，之後每 10 min 重抓。
+    // 不放在 setup()：HTTP 失敗會掛 15s timeout，會卡住 splash + 對時顯示。
+    static bool wxFirstFetchDone = false;
+    if (splashFinished && !wxFirstFetchDone) {
+        wxFirstFetchDone = true;
+        lastWxMs = now;
+        if (wx.fetchAll()) ui.setWeatherDirty();
+    }
+    if (wifi.isConnected() && wxFirstFetchDone && now - lastWxMs >= WX_REFRESH_MS) {
         lastWxMs = now;
         if (wx.fetchAll()) {
             ui.setWeatherDirty();
         }
     }
 
-    // Slideshow auto-advance
+    // Slideshow auto-advance：tick 內部每 10s 換一張，翻頁時標記照片 dirty
     slideshow.tick(now);
+    int slIndex = slideshow.getCurrentIndex();
+    if (slIndex != lastSlideshowIndex) {
+        lastSlideshowIndex = slIndex;
+        ui.setPhotoDirty();
+    }
 
     // --- Rendering ---
     // Splash 畫面優先：setup() 已畫好，3 秒內不重繪
@@ -375,7 +385,9 @@ void loop() {
         }
     }
 
-    // 強制餵狗
+    // 強制餵狗 + 短睡 15ms：讓觸控每 ~15ms 取樣一次（原 50ms 太慢，
+    // getTouch 內部 Z 防抖 5 次取樣要 ~50ms，一個滑動過程只抓 1-2 個有效樣本，
+    // 位移算不出來 → 落回 tap）。15ms 讓滑動 300ms 能抓 10-20 個樣本。
     yield();
-    delay(50);
+    delay(15);
 }

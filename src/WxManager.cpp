@@ -57,7 +57,7 @@ int WxManager::wxIconType(int code) {
 bool WxManager::fetchAll() {
     lastFetchMs = millis();
 
-    // ── 1. 天氣預報（改用 HTTP，避免 WiFiClientSecure 崩潰）──
+    // ── 1. 天氣預報（HTTP，免金鑰）──
     {
         HTTPClient http;
         String url = String("http://api.open-meteo.com/v1/forecast?latitude=")
