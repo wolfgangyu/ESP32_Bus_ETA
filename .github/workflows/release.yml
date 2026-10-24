@@ -21,6 +21,34 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Create config_local.h
+        run: |
+          cat > ${{ github.workspace }}/include/config_local.h << 'EOF'
+          #ifndef CONFIG_LOCAL_H
+          #define CONFIG_LOCAL_H
+
+          // Wi-Fi 設定
+          #define WIFI_SSID        "${{ secrets.WIFI_SSID }}"
+          #define WIFI_PASSWORD    "${{ secrets.WIFI_PASSWORD }}"
+
+          // TDX API 設定
+          #define TDX_CLIENT_ID    "${{ secrets.TDX_CLIENT_ID }}"
+          #define TDX_CLIENT_SECRET "${{ secrets.TDX_CLIENT_SECRET }}"
+
+          // 目標站牌
+          #define TARGET_STOP_NAME "西新里(新新公園)"
+          #define TARGET_STOP_WEST  "TPE12726"
+          #define TARGET_STOP_EAST  "TPE12858"
+
+          // 觸控校準參數
+          #define TOUCH_CAL_X0  300
+          #define TOUCH_CAL_X1  3800
+          #define TOUCH_CAL_Y0  300
+          #define TOUCH_CAL_Y1  3800
+
+          #endif
+          EOF
+
       - name: Install PlatformIO
         run: pip install platformio
 
